@@ -60,18 +60,9 @@ dist/
 # ===== Ignore all Markdown files except important docs =====
 *.md
 !README.md
-!QUICKSTART*.md
-!ALERT_MANAGER_COMPLETE.md
-!IMPLEMENTATION_COMPLETE.md
-!VERIFICATION_CHECKLIST.md
-!WEBSOCKET_IMPLEMENTATION.md
-!WEBSOCKET_SUMMARY.md
-!COMPLETE_ANSWER.md
 
 # ===== Ignore test files but keep test scripts we created =====
 test_*.py
-!test_websocket_client.py
-!test_alert_system.py
 demo_*
 sample_*
 example_*
@@ -87,3 +78,5 @@ example_*
 *.log
 /tmp/
 
+# ===== Shell scripts =====
+*.sh
