@@ -73,7 +73,7 @@ export function Hero() {
                 whileTap={{ scale: 0.95 }}
               >
                 <Sparkles size={18} />
-                Request Access
+                Let's Get Started
                 <ArrowRight size={18} className="group-hover:translate-x-1" />
               </motion.button>
               <motion.button

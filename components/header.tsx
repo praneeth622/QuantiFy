@@ -54,7 +54,7 @@ export function Header() {
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              Request Access
+              Dashboard
             </motion.button>
           </div>
 
@@ -82,7 +82,7 @@ export function Header() {
               </a>
             ))}
             <button className="px-6 py-2 bg-accent text-accent-foreground rounded-lg font-medium w-full hover:bg-accent/90 transition-colors">
-              Request Access
+              Go to Dashboard
             </button>
           </motion.nav>
         )}
