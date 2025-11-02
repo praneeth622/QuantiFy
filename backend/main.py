@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from api.routes import analytics, market_data, alerts, health
+from api.api_routes import router as consolidated_router  # Import consolidated routes
 from database.connection import database_manager
 from ingestion.websocket_manager import websocket_manager
 from config import settings
@@ -69,16 +70,20 @@ app = FastAPI(
 # Add middleware
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Configure CORS
+# Configure CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.ALLOWED_ORIGINS + ["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
-# Include routers
+# Include consolidated routes
+app.include_router(consolidated_router, tags=["API"])
+
+# Include original routers for backward compatibility
 app.include_router(health.router, prefix="/api/v1", tags=["Health"])
 app.include_router(market_data.router, prefix="/api/v1", tags=["Market Data"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
