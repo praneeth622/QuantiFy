@@ -31,7 +31,15 @@ export default function DashboardPage() {
     debug: true, // Enable debug mode to see WebSocket messages
   });
 
-  // Control Panel State
+  // Get unique symbols from ticks FIRST (moved up)
+  const availableSymbols = useMemo(() => {
+    const symbols = new Set(ticks.map((t) => t.symbol).filter(Boolean));
+    // If no symbols from WebSocket, provide default options
+    const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'TESTBTC', 'ADAUSDT', 'SOLUSDT'];
+    return symbols.size > 0 ? Array.from(symbols).sort() : defaultSymbols;
+  }, [ticks]);
+
+  // Control Panel State (start with BTCUSDT, will auto-update)
   const { config, setConfig } = useControlPanel({
     symbols: ['BTCUSDT'],
     timeframe: '1m',
@@ -48,6 +56,33 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Auto-switch to first available symbol when ticks arrive
+  useEffect(() => {
+    if (ticks.length > 0 && availableSymbols.length > 0) {
+      const currentSymbol = config.symbols[0];
+      // If current symbol has no data, switch to first available
+      const hasDataForCurrentSymbol = ticks.some(t => t.symbol === currentSymbol);
+      
+      if (!hasDataForCurrentSymbol) {
+        // Find the most common symbol in ticks
+        const symbolCounts: Record<string, number> = {};
+        ticks.forEach(tick => {
+          symbolCounts[tick.symbol] = (symbolCounts[tick.symbol] || 0) + 1;
+        });
+        const mostCommonSymbol = Object.entries(symbolCounts)
+          .sort((a, b) => b[1] - a[1])[0]?.[0];
+        
+        if (mostCommonSymbol && mostCommonSymbol !== currentSymbol) {
+          console.log(`Auto-switching from ${currentSymbol} to ${mostCommonSymbol} (has data)`);
+          setConfig({
+            ...config,
+            symbols: [mostCommonSymbol],
+          });
+        }
+      }
+    }
+  }, [ticks.length, availableSymbols]); // Only run when tick count or available symbols change
+
   // Use first symbol from control panel config
   const selectedSymbol = config.symbols[0] || 'BTCUSDT';
   const selectedTimeframe = config.timeframe;
@@ -63,14 +98,6 @@ export default function DashboardPage() {
       alertCount: alerts.length,
     });
   }, [ticks, analytics, alerts, isConnected, selectedSymbol]);
-
-  // Get unique symbols from ticks
-  const availableSymbols = useMemo(() => {
-    const symbols = new Set(ticks.map((t) => t.symbol).filter(Boolean));
-    // If no symbols from WebSocket, provide default options
-    const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'TESTBTC', 'ADAUSDT', 'SOLUSDT'];
-    return symbols.size > 0 ? Array.from(symbols).sort() : defaultSymbols;
-  }, [ticks]);
 
   // Filter ticks by selected symbol
   const symbolTicks = useMemo(() => {
