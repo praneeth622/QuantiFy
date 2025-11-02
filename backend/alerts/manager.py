@@ -6,9 +6,10 @@ import asyncio
 import logging
 from typing import Dict, List, Set, Callable, Optional
 from datetime import datetime, timedelta
+from sqlalchemy import text
 
 from database.connection import database_manager
-from database.models import Alert, UserAlert
+from database.models import Alerts, AlertHistory
 from analytics.engine import analytics_engine
 from config import settings
 
@@ -19,7 +20,7 @@ class AlertManager:
     """Manages real-time alert monitoring and triggering"""
     
     def __init__(self):
-        self.active_alerts: Dict[int, UserAlert] = {}
+        self.active_alerts: Dict[int, Alerts] = {}
         self.alert_callbacks: Dict[str, Callable] = {}
         self.monitoring_task: Optional[asyncio.Task] = None
         self.is_running = False
@@ -54,8 +55,8 @@ class AlertManager:
         """Register a new user alert"""
         try:
             async for session in database_manager.get_session():
-                user_alert = await session.get(UserAlert, alert_id)
-                if user_alert and user_alert.is_enabled:
+                user_alert = await session.get(Alerts, alert_id)
+                if user_alert and user_alert.is_active:
                     self.active_alerts[alert_id] = user_alert
                     logger.info(f"Registered user alert {alert_id}")
                 break
@@ -86,13 +87,13 @@ class AlertManager:
         """Trigger a new alert"""
         try:
             # Create alert record
-            alert = Alert(
+            alert = Alerts(
                 alert_type=alert_type,
                 symbol=symbol,
-                title=title,
+                condition=title,
                 message=message,
                 severity=severity,
-                threshold_value=threshold_value,
+                threshold=threshold_value,
                 actual_value=actual_value,
                 triggered_at=datetime.utcnow()
             )
@@ -117,12 +118,12 @@ class AlertManager:
         try:
             async for session in database_manager.get_session():
                 result = await session.execute(
-                    "SELECT * FROM user_alerts WHERE is_enabled = true"
+                    text("SELECT * FROM alerts WHERE is_active = true")
                 )
                 user_alerts = result.fetchall()
                 
                 for alert_data in user_alerts:
-                    user_alert = UserAlert(**dict(alert_data))
+                    user_alert = Alerts(**dict(alert_data))
                     self.active_alerts[user_alert.id] = user_alert
                 
                 logger.info(f"Loaded {len(self.active_alerts)} active user alerts")
@@ -148,7 +149,7 @@ class AlertManager:
                 logger.error(f"Error in alert monitoring: {e}")
                 await asyncio.sleep(5)
     
-    async def _check_user_alert(self, user_alert: UserAlert):
+    async def _check_user_alert(self, user_alert: Alerts):
         """Check if a user alert should be triggered"""
         try:
             # Check cooldown
@@ -174,7 +175,7 @@ class AlertManager:
         except Exception as e:
             logger.error(f"Error checking user alert {user_alert.id}: {e}")
     
-    async def _get_current_value(self, user_alert: UserAlert) -> Optional[float]:
+    async def _get_current_value(self, user_alert: Alerts) -> Optional[float]:
         """Get current value for alert evaluation"""
         try:
             if user_alert.alert_type == "price":
@@ -218,7 +219,7 @@ class AlertManager:
         else:
             return False
     
-    async def _trigger_user_alert(self, user_alert: UserAlert, current_value: float):
+    async def _trigger_user_alert(self, user_alert: Alerts, current_value: float):
         """Trigger a user-defined alert"""
         try:
             # Set cooldown
@@ -278,7 +279,7 @@ class AlertManager:
         
         return "medium"
     
-    async def _call_alert_callbacks(self, alert: Alert):
+    async def _call_alert_callbacks(self, alert: Alerts):
         """Call registered alert callbacks"""
         for callback_name, callback in self.alert_callbacks.items():
             try:

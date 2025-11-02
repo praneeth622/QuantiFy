@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import Alert, UserAlert
+from database.models import Alerts, AlertHistory
 from alerts.manager import alert_manager
 
-router = APIRouter()
+router = APIRouter(prefix="/alerts")
 
 
 class AlertResponse(BaseModel):
@@ -58,21 +58,21 @@ async def get_alerts(
 ):
     """Get alerts with optional filters"""
     try:
-        query = select(Alert)
+        query = select(Alerts)
         
         # Apply filters
         conditions = []
         if symbol:
-            conditions.append(Alert.symbol == symbol.upper())
+            conditions.append(Alerts.symbol == symbol.upper())
         if severity:
-            conditions.append(Alert.severity == severity)
+            conditions.append(Alerts.severity == severity)
         if is_active is not None:
-            conditions.append(Alert.is_active == is_active)
+            conditions.append(Alerts.is_active == is_active)
         
         if conditions:
             query = query.where(and_(*conditions))
         
-        query = query.order_by(desc(Alert.triggered_at)).limit(limit)
+        query = query.order_by(desc(Alerts.last_triggered)).limit(limit)
         
         result = await db.execute(query)
         alerts = result.scalars().all()
@@ -100,7 +100,7 @@ async def get_alerts(
 async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
     """Get specific alert by ID"""
     try:
-        query = select(Alert).where(Alert.id == alert_id)
+        query = select(Alerts).where(Alerts.id == alert_id)
         result = await db.execute(query)
         alert = result.scalar_one_or_none()
         
@@ -129,7 +129,7 @@ async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
 async def resolve_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
     """Mark an alert as resolved"""
     try:
-        query = select(Alert).where(Alert.id == alert_id)
+        query = select(Alerts).where(Alerts.id == alert_id)
         result = await db.execute(query)
         alert = result.scalar_one_or_none()
         
@@ -158,14 +158,14 @@ async def get_user_alerts(
 ):
     """Get user-defined alert configurations"""
     try:
-        query = select(UserAlert).where(UserAlert.user_id == user_id)
+        query = select(Alerts).where(Alerts.user_id == user_id)
         
         if symbol:
-            query = query.where(UserAlert.symbol == symbol.upper())
+            query = query.where(Alerts.symbol == symbol.upper())
         if is_enabled is not None:
-            query = query.where(UserAlert.is_enabled == is_enabled)
+            query = query.where(Alerts.is_active == is_enabled)
         
-        query = query.order_by(desc(UserAlert.created_at))
+        query = query.order_by(desc(Alerts.created_at))
         
         result = await db.execute(query)
         user_alerts = result.scalars().all()
@@ -194,13 +194,13 @@ async def create_user_alert(
 ):
     """Create a new user alert configuration"""
     try:
-        user_alert = UserAlert(
+        user_alert = Alerts(
             user_id=request.user_id,
             symbol=request.symbol.upper(),
             alert_type=request.alert_type,
             condition=request.condition,
             threshold=request.threshold,
-            is_enabled=True
+            is_active=True
         )
         
         db.add(user_alert)
@@ -234,14 +234,14 @@ async def update_user_alert(
 ):
     """Update user alert configuration"""
     try:
-        query = select(UserAlert).where(UserAlert.id == alert_id)
+        query = select(Alerts).where(Alerts.id == alert_id)
         result = await db.execute(query)
         user_alert = result.scalar_one_or_none()
         
         if not user_alert:
             raise HTTPException(status_code=404, detail="User alert not found")
         
-        user_alert.is_enabled = is_enabled
+        user_alert.is_active = is_enabled
         if threshold is not None:
             user_alert.threshold = threshold
         user_alert.updated_at = datetime.utcnow()
@@ -260,7 +260,7 @@ async def update_user_alert(
 async def delete_user_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
     """Delete user alert configuration"""
     try:
-        query = select(UserAlert).where(UserAlert.id == alert_id)
+        query = select(Alerts).where(Alerts.id == alert_id)
         result = await db.execute(query)
         user_alert = result.scalar_one_or_none()
         
@@ -286,7 +286,7 @@ async def get_alerts_summary(db: AsyncSession = Depends(get_db)):
     """Get alerts summary statistics"""
     try:
         # Count alerts by severity
-        severity_query = select(Alert.severity).where(Alert.is_active == True)
+        severity_query = select(Alerts.severity).where(Alerts.is_active == True)
         result = await db.execute(severity_query)
         severities = [row[0] for row in result.fetchall()]
         

@@ -10,10 +10,10 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import AnalyticsResult
+from database.models import AnalyticsResults
 from analytics.engine import analytics_engine
 
-router = APIRouter()
+router = APIRouter(prefix="/analytics")
 
 
 class AnalyticsRequest(BaseModel):
@@ -212,10 +212,10 @@ async def get_analytics_history(
 ):
     """Get historical analytics results"""
     try:
-        query = select(AnalyticsResult).where(
-            AnalyticsResult.symbol_pair == symbol_pair.upper(),
-            AnalyticsResult.metric_name == metric_name
-        ).order_by(desc(AnalyticsResult.timestamp)).limit(limit)
+        query = select(AnalyticsResults).where(
+            AnalyticsResults.symbol_pair == symbol_pair.upper(),
+            AnalyticsResults.metric_name == metric_name
+        ).order_by(desc(AnalyticsResults.timestamp)).limit(limit)
         
         result = await db.execute(query)
         analytics = result.scalars().all()
@@ -240,8 +240,8 @@ async def get_metrics_summary(db: AsyncSession = Depends(get_db)):
     try:
         # Get distinct metric names and symbol pairs
         metrics_query = select(
-            AnalyticsResult.metric_name,
-            AnalyticsResult.symbol_pair
+            AnalyticsResults.metric_name,
+            AnalyticsResults.symbol_pair
         ).distinct()
         
         result = await db.execute(metrics_query)
