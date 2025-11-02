@@ -10,15 +10,20 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from database.connection import get_db
-from database.models import TickData, CandleData, Symbol
+from database.models import RawTicks, ResampledData, MarketMetadata
 from ingestion.websocket_manager import websocket_manager
 
-router = APIRouter()
+router = APIRouter(prefix="/market-data")
+
+
+class SymbolInfo(BaseModel):
+    symbol: str
+    exchange: str
 
 
 class TickDataResponse(BaseModel):
     symbol: str
-    exchange: str
+    exchange: str = "binance"
     price: float
     volume: float
     timestamp: datetime
@@ -26,7 +31,7 @@ class TickDataResponse(BaseModel):
 
 class CandleDataResponse(BaseModel):
     symbol: str
-    exchange: str
+    exchange: str = "binance"
     interval: str
     open_price: float
     high_price: float
@@ -40,14 +45,18 @@ class SubscriptionRequest(BaseModel):
     symbol: str
 
 
-@router.get("/symbols", response_model=List[str])
-async def get_active_symbols(db: AsyncSession = Depends(get_db)):
-    """Get list of active symbols"""
+@router.get("/symbols", response_model=List[SymbolInfo])
+async def get_symbols(db: AsyncSession = Depends(get_db)):
+    """Get all available symbols"""
     try:
-        query = select(Symbol.symbol).where(Symbol.is_active == True)
+        query = select(MarketMetadata.symbol, MarketMetadata.exchange).distinct()
         result = await db.execute(query)
-        symbols = [row[0] for row in result.fetchall()]
-        return symbols
+        symbols = result.all()
+        
+        return [
+            SymbolInfo(symbol=symbol, exchange=exchange)
+            for symbol, exchange in symbols
+        ]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -58,11 +67,11 @@ async def get_tick_data(
     limit: int = Query(default=100, le=1000),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get recent tick data for a symbol"""
+    """Get raw tick data for a symbol"""
     try:
-        query = select(TickData).where(
-            TickData.symbol == symbol.upper()
-        ).order_by(desc(TickData.timestamp)).limit(limit)
+        query = select(RawTicks).where(
+            RawTicks.symbol == symbol.upper()
+        ).order_by(desc(RawTicks.timestamp)).limit(limit)
         
         result = await db.execute(query)
         ticks = result.scalars().all()
@@ -70,9 +79,9 @@ async def get_tick_data(
         return [
             TickDataResponse(
                 symbol=tick.symbol,
-                exchange=tick.exchange,
-                price=tick.price,
-                volume=tick.volume,
+                exchange="binance",
+                price=float(tick.price),
+                quantity=float(tick.quantity),
                 timestamp=tick.timestamp
             )
             for tick in ticks
@@ -90,10 +99,10 @@ async def get_candle_data(
 ):
     """Get candlestick data for a symbol"""
     try:
-        query = select(CandleData).where(
-            CandleData.symbol == symbol.upper(),
-            CandleData.interval == interval
-        ).order_by(desc(CandleData.timestamp)).limit(limit)
+        query = select(ResampledData).where(
+            ResampledData.symbol == symbol.upper(),
+            ResampledData.timeframe == interval
+        ).order_by(desc(ResampledData.timestamp)).limit(limit)
         
         result = await db.execute(query)
         candles = result.scalars().all()
@@ -101,13 +110,13 @@ async def get_candle_data(
         return [
             CandleDataResponse(
                 symbol=candle.symbol,
-                exchange=candle.exchange,
-                interval=candle.interval,
-                open_price=candle.open_price,
-                high_price=candle.high_price,
-                low_price=candle.low_price,
-                close_price=candle.close_price,
-                volume=candle.volume,
+                exchange="binance",
+                interval=candle.timeframe,
+                open_price=float(candle.open),
+                high_price=float(candle.high),
+                low_price=float(candle.low),
+                close_price=float(candle.close),
+                volume=float(candle.volume),
                 timestamp=candle.timestamp
             )
             for candle in candles
@@ -158,9 +167,9 @@ async def get_latest_price(
 ):
     """Get latest price for a symbol"""
     try:
-        query = select(TickData).where(
-            TickData.symbol == symbol.upper()
-        ).order_by(desc(TickData.timestamp)).limit(1)
+        query = select(RawTicks).where(
+            RawTicks.symbol == symbol.upper()
+        ).order_by(desc(RawTicks.timestamp)).limit(1)
         
         result = await db.execute(query)
         tick = result.scalar_one_or_none()
@@ -170,8 +179,8 @@ async def get_latest_price(
         
         return {
             "symbol": tick.symbol,
-            "price": tick.price,
-            "volume": tick.volume,
+            "price": float(tick.price),
+            "volume": float(tick.quantity),
             "timestamp": tick.timestamp
         }
     except HTTPException:

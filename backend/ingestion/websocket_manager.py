@@ -11,7 +11,7 @@ from datetime import datetime
 
 from config import settings
 from database.connection import database_manager
-from database.models import TickData
+from database.models import RawTicks
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +65,9 @@ class WebSocketManager:
         
         self.active_streams.clear()
         
-        # Close socket manager
-        if self.socket_manager:
-            await self.socket_manager.close()
+        # Close socket manager gracefully
+        # BinanceSocketManager doesn't have a close() method, streams are automatically stopped
+        self.socket_manager = None
         
         # Close client
         if self.client:
@@ -139,11 +139,10 @@ class WebSocketManager:
             timestamp = datetime.fromtimestamp(data['T'] / 1000)
             
             # Create tick data object
-            tick_data = TickData(
+            tick_data = RawTicks(
                 symbol=symbol,
-                exchange="binance",
                 price=float(data['p']),
-                volume=float(data['q']),
+                quantity=float(data['q']),
                 timestamp=timestamp
             )
             
@@ -156,7 +155,7 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error processing ticker data: {e}")
     
-    async def _store_tick_data(self, tick_data: TickData):
+    async def _store_tick_data(self, tick_data: RawTicks):
         """Store tick data in database"""
         try:
             async for session in database_manager.get_session():

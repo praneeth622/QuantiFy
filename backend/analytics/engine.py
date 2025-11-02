@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 import logging
 
 from database.connection import database_manager
-from database.models import TickData, CandleData, AnalyticsResult
+from database.models import RawTicks, ResampledData, AnalyticsResults
 
 logger = logging.getLogger(__name__)
 
