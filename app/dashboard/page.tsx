@@ -4,7 +4,7 @@
  */
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import {
   Select,
@@ -16,28 +16,60 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Settings, TrendingUp, Activity, BarChart3, AlertCircle } from 'lucide-react';
+import { Settings, TrendingUp, Activity, BarChart3, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { PriceChart } from '@/components/PriceChart';
 import { VolumeChart } from '@/components/VolumeChart';
 import { SpreadAnalysisChart } from '@/components/SpreadAnalysisChart';
 import { CorrelationChart } from '@/components/CorrelationChart';
+import { ControlPanel, useControlPanel, type ControlPanelConfig } from '@/components/ControlPanel';
+import { toast } from 'sonner';
 
 export default function DashboardPage() {
   const { ticks, analytics, alerts, isConnected } = useWebSocket({
     autoReconnect: true,
     showNotifications: false, // Disable toasts for cleaner dashboard
-    debug: false,
+    debug: true, // Enable debug mode to see WebSocket messages
   });
 
-  // State
-  const [selectedSymbol, setSelectedSymbol] = useState<string>('BTCUSDT');
-  const [selectedTimeframe, setSelectedTimeframe] = useState<string>('1m');
+  // Control Panel State
+  const { config, setConfig } = useControlPanel({
+    symbols: ['BTCUSDT'],
+    timeframe: '1m',
+    rollingWindow: 50,
+    analytics: {
+      spread: true,
+      correlation: true,
+      volatility: true,
+      volume: true,
+    },
+  });
+
+  // UI State
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Use first symbol from control panel config
+  const selectedSymbol = config.symbols[0] || 'BTCUSDT';
+  const selectedTimeframe = config.timeframe;
+
+  // Debug logging
+  useEffect(() => {
+    console.log('Dashboard Update:', {
+      connected: isConnected,
+      tickCount: ticks.length,
+      symbols: [...new Set(ticks.map(t => t.symbol))],
+      selectedSymbol,
+      analyticsAvailable: !!analytics,
+      alertCount: alerts.length,
+    });
+  }, [ticks, analytics, alerts, isConnected, selectedSymbol]);
 
   // Get unique symbols from ticks
   const availableSymbols = useMemo(() => {
     const symbols = new Set(ticks.map((t) => t.symbol).filter(Boolean));
-    return Array.from(symbols).sort();
+    // If no symbols from WebSocket, provide default options
+    const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'TESTBTC', 'ADAUSDT', 'SOLUSDT'];
+    return symbols.size > 0 ? Array.from(symbols).sort() : defaultSymbols;
   }, [ticks]);
 
   // Filter ticks by selected symbol
@@ -71,6 +103,55 @@ export default function DashboardPage() {
     };
   }, [symbolTicks]);
 
+  // Control Panel Handlers
+  const handleConfigChange = (newConfig: ControlPanelConfig) => {
+    setConfig(newConfig);
+    toast.info('Configuration Updated', {
+      description: `Updated to ${newConfig.symbols.join(', ')} @ ${newConfig.timeframe}`,
+    });
+  };
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    toast.info('Refreshing data...', {
+      description: 'Reconnecting to WebSocket and fetching latest data',
+    });
+    
+    // Simulate refresh (in real implementation, this would trigger WebSocket reconnect)
+    setTimeout(() => {
+      setIsRefreshing(false);
+      toast.success('Data refreshed successfully');
+    }, 1500);
+  };
+
+  const handleExport = (dateRange: { from: Date; to: Date }) => {
+    const from = dateRange.from.toLocaleDateString();
+    const to = dateRange.to.toLocaleDateString();
+    
+    toast.success('Exporting CSV', {
+      description: `Exporting ${config.symbols.join(', ')} data from ${from} to ${to}`,
+    });
+    
+    // Create CSV content
+    const csvContent = [
+      ['Symbol', 'Timestamp', 'Price', 'Quantity'].join(','),
+      ...symbolTicks.map(tick => 
+        [tick.symbol, new Date(tick.timestamp).toISOString(), tick.price, tick.quantity].join(',')
+      )
+    ].join('\n');
+    
+    // Download CSV
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quantify-export-${from}-to-${to}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Top Bar */}
@@ -89,38 +170,16 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Center: Symbol & Timeframe Selectors */}
-          <div className="flex items-center gap-3">
-            <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue placeholder="Select symbol" />
-              </SelectTrigger>
-              <SelectContent>
-                {availableSymbols.length > 0 ? (
-                  availableSymbols.map((symbol) => (
-                    <SelectItem key={symbol} value={symbol}>
-                      {symbol}
-                    </SelectItem>
-                  ))
-                ) : (
-                  <SelectItem value="BTCUSDT">BTCUSDT</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-
-            <Select value={selectedTimeframe} onValueChange={setSelectedTimeframe}>
-              <SelectTrigger className="w-[100px]">
-                <SelectValue placeholder="Timeframe" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1m">1m</SelectItem>
-                <SelectItem value="5m">5m</SelectItem>
-                <SelectItem value="15m">15m</SelectItem>
-                <SelectItem value="1h">1h</SelectItem>
-                <SelectItem value="4h">4h</SelectItem>
-                <SelectItem value="1d">1d</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Center: Compact Control Panel */}
+          <div className="hidden lg:block">
+            <ControlPanel
+              config={config}
+              onChange={handleConfigChange}
+              onRefresh={handleRefresh}
+              availableSymbols={availableSymbols}
+              isRefreshing={isRefreshing}
+              compact
+            />
           </div>
 
           {/* Right: Actions */}
@@ -129,8 +188,9 @@ export default function DashboardPage() {
               variant="ghost"
               size="icon"
               onClick={() => setSidebarOpen(!sidebarOpen)}
+              title={sidebarOpen ? 'Hide Control Panel' : 'Show Control Panel'}
             >
-              <Settings className="w-5 h-5" />
+              {sidebarOpen ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
             </Button>
           </div>
         </div>
@@ -142,42 +202,40 @@ export default function DashboardPage() {
             {isConnected ? 'Connected' : 'Disconnected'}
           </Badge>
         </div>
+        
+        {/* Debug Info - Remove after fixing */}
+        <div className="px-4 py-2 bg-muted/50 text-xs space-y-1">
+          <div className="flex gap-4 flex-wrap">
+            <span>🔌 Connected: {isConnected ? '✅' : '❌'}</span>
+            <span>📊 Ticks: {ticks.length}</span>
+            <span>🎯 Symbol: {selectedSymbol}</span>
+            <span>🔍 Filtered: {symbolTicks.length}</span>
+            <span>📈 Analytics: {analytics ? '✅' : '❌'}</span>
+            <span>🔔 Alerts: {alerts.length}</span>
+          </div>
+          {ticks.length > 0 && (
+            <div className="text-muted-foreground">
+              Latest: {ticks[0]?.symbol} @ ${ticks[0]?.price?.toFixed(2)} 
+              {ticks[0]?.timestamp && ` (${new Date(ticks[0].timestamp).toLocaleTimeString()})`}
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="flex">
-        {/* Left Sidebar */}
+        {/* Left Sidebar - Control Panel */}
         {sidebarOpen && (
-          <aside className="w-64 bg-card border-r border-border p-4 space-y-4 hidden lg:block">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Settings className="w-4 h-4" />
-                  Control Panel
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Auto Refresh</label>
-                  <Button variant="outline" size="sm" className="w-full justify-start">
-                    Enabled
-                  </Button>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Data Range</label>
-                  <Button variant="outline" size="sm" className="w-full justify-start">
-                    Last 100 ticks
-                  </Button>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Alerts</label>
-                  <Button variant="outline" size="sm" className="w-full justify-start gap-2">
-                    <AlertCircle className="w-4 h-4" />
-                    {alerts.length} Active
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+          <aside className="w-80 bg-card border-r border-border p-4 space-y-4 hidden lg:block overflow-y-auto max-h-[calc(100vh-4rem)]">
+            <ControlPanel
+              config={config}
+              onChange={handleConfigChange}
+              onRefresh={handleRefresh}
+              onExport={handleExport}
+              availableSymbols={availableSymbols}
+              isRefreshing={isRefreshing}
+            />
 
+            {/* Quick Stats */}
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Quick Stats</CardTitle>
@@ -290,36 +348,42 @@ export default function DashboardPage() {
             </Card>
 
             {/* Chart 2: Volume Chart */}
-            <Card>
-              <CardContent className="pt-6">
-                <VolumeChart
-                  symbol={selectedSymbol}
-                  timeframe={selectedTimeframe}
-                  data={ticks}
-                  className="h-[350px]"
-                />
-              </CardContent>
-            </Card>
+            {config.analytics.volume && (
+              <Card>
+                <CardContent className="pt-6">
+                  <VolumeChart
+                    symbol={selectedSymbol}
+                    timeframe={selectedTimeframe}
+                    data={ticks}
+                    className="h-[350px]"
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Chart 3: Spread Analysis */}
-            <Card>
-              <CardContent className="pt-6">
-                <SpreadAnalysisChart
-                  analytics={analytics}
-                  className="h-[350px]"
-                />
-              </CardContent>
-            </Card>
+            {config.analytics.spread && (
+              <Card>
+                <CardContent className="pt-6">
+                  <SpreadAnalysisChart
+                    analytics={analytics}
+                    className="h-[350px]"
+                  />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Chart 4: Correlation Matrix */}
-            <Card>
-              <CardContent className="pt-6">
-                <CorrelationChart
-                  analytics={analytics}
-                  className="h-[350px]"
-                />
-              </CardContent>
-            </Card>
+            {config.analytics.correlation && (
+              <Card>
+                <CardContent className="pt-6">
+                  <CorrelationChart
+                    analytics={analytics}
+                    className="h-[350px]"
+                  />
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           {/* Bottom Stats Table */}

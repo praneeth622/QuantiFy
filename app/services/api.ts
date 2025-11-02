@@ -245,13 +245,30 @@ export const getCorrelation = async (
  */
 export const getRollingCorrelation = async (
   params: CorrelationQueryParams
-): Promise<RollingCorrelation> => {
+): Promise<any> => {
   try {
-    const response = await apiClient.get<RollingCorrelation>(
-      '/api/analytics/rolling-correlation',
-      { params }
-    );
-    return response.data;
+    // The backend expects symbol1, symbol2, window parameters
+    const response = await apiClient.get('/api/analytics/correlation', { 
+      params: {
+        symbol1: params.symbol1,
+        symbol2: params.symbol2,
+        window: params.window_size || 50,
+      }
+    });
+    
+    // Transform backend response to expected format
+    const data = response.data;
+    return {
+      timestamps: data.timestamps || [],
+      correlations: data.correlations || [],
+      symbol_pair: `${params.symbol1}-${params.symbol2}`,
+      window_size: params.window_size || 50,
+      current_correlation: data.current_correlation,
+      mean_correlation: data.mean_correlation,
+      std_correlation: data.std_correlation,
+      min_correlation: data.min_correlation,
+      max_correlation: data.max_correlation,
+    };
   } catch (error) {
     throw error;
   }
