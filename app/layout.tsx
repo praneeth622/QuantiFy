@@ -4,6 +4,7 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 import { Poppins, Geist_Mono, Lora } from 'next/font/google'
+import { Toaster } from 'sonner'
 
 // Initialize fonts
 const _poppins = Poppins({ subsets: ['latin'], weight: ["100","200","300","400","500","600","700","800","900"] })
@@ -25,6 +26,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`font-sans antialiased`}>
         {children}
+        <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
   )
