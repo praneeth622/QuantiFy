@@ -83,20 +83,43 @@ export function VolumeChart({ symbol, timeframe, data, className = '' }: VolumeC
 
   const chartData = useMemo(() => {
     try {
-      if (!data || data.length === 0) return [];
+      if (!data || data.length === 0) {
+        console.log('[VolumeChart] No data received');
+        return [];
+      }
+
+      console.log('[VolumeChart] Received data:', {
+        totalPoints: data.length,
+        firstPoint: data[0],
+        symbol,
+      });
 
       const filteredData = data
         .filter((tick) => {
-          return (
-            tick &&
-            tick.symbol === symbol &&
-            typeof tick.price === 'number' &&
-            tick.quantity !== undefined &&
-            tick.timestamp
-          );
+          const hasSymbol = tick && tick.symbol === symbol;
+          const hasPrice = typeof tick.price === 'number';
+          const hasQuantity = tick.quantity !== undefined;
+          const hasTimestamp = !!tick.timestamp;
+          
+          if (!hasSymbol || !hasPrice || !hasQuantity || !hasTimestamp) {
+            console.log('[VolumeChart] Filtering out tick:', {
+              hasSymbol,
+              hasPrice,
+              hasQuantity,
+              hasTimestamp,
+              tick,
+            });
+          }
+          
+          return hasSymbol && hasPrice && hasQuantity && hasTimestamp;
         })
         .slice(0, 100)
         .reverse();
+
+      console.log('[VolumeChart] Filtered data:', {
+        filteredCount: filteredData.length,
+        symbol,
+      });
 
       if (filteredData.length === 0) {
         setError(`No volume data for ${symbol}`);

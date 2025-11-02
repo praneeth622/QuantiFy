@@ -92,8 +92,15 @@ export function PriceChart({ symbol, timeframe, data, className = '' }: PriceCha
   const chartData = useMemo(() => {
     try {
       if (!data || data.length === 0) {
+        console.log('[PriceChart] No data received');
         return [];
       }
+
+      console.log('[PriceChart] Received data:', {
+        totalPoints: data.length,
+        firstPoint: data[0],
+        symbol,
+      });
 
       // Filter data by symbol and take last 100 points
       const filteredData = data
@@ -107,6 +114,11 @@ export function PriceChart({ symbol, timeframe, data, className = '' }: PriceCha
         })
         .slice(0, 100)
         .reverse(); // Reverse to show chronological order
+
+      console.log('[PriceChart] Filtered data:', {
+        filteredCount: filteredData.length,
+        symbol,
+      });
 
       if (filteredData.length === 0) {
         setError(`No data available for ${symbol}`);

@@ -4,7 +4,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 import { Poppins, Geist_Mono, Lora } from 'next/font/google'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
+import { QueryProvider } from './providers/QueryProvider'
 
 // Initialize fonts
 const _poppins = Poppins({ subsets: ['latin'], weight: ["100","200","300","400","500","600","700","800","900"] })
@@ -25,7 +26,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
-        {children}
+        <QueryProvider>
+          {children}
+        </QueryProvider>
         <Toaster position="top-right" richColors closeButton />
       </body>
     </html>

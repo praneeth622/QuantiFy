@@ -1,11 +1,14 @@
 /**
  * QuantiFy Trading Dashboard
- * Main dashboard with real-time data visualization
+ * Main dashboard with real-time data visualization and REST API integration
  */
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useAggregatedTicks } from '../hooks/useAggregatedTicks';
+import { useSymbols, useTicks, useInvalidateMarketData } from '../hooks/useMarketData';
+import { useAlerts } from '../hooks/useAlerts';
 import {
   Select,
   SelectContent,
@@ -16,33 +19,31 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Settings, TrendingUp, Activity, BarChart3, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Settings, TrendingUp, Activity, BarChart3, AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { PriceChart } from '@/components/PriceChart';
 import { VolumeChart } from '@/components/VolumeChart';
 import { SpreadAnalysisChart } from '@/components/SpreadAnalysisChart';
 import { CorrelationChart } from '@/components/CorrelationChart';
 import { ControlPanel, useControlPanel, type ControlPanelConfig } from '@/components/ControlPanel';
 import { toast } from 'sonner';
+import type { Tick } from '@/app/services/types';
 
 export default function DashboardPage() {
-  const { ticks, analytics, alerts, isConnected } = useWebSocket({
+  // ========================================================================
+  // HOOKS & STATE
+  // ========================================================================
+  
+  // WebSocket for real-time updates
+  const { ticks: wsTicks, analytics, alerts: wsAlerts, isConnected } = useWebSocket({
     autoReconnect: true,
-    showNotifications: false, // Disable toasts for cleaner dashboard
-    debug: true, // Enable debug mode to see WebSocket messages
+    showNotifications: false,
+    debug: true,
   });
 
-  // Get unique symbols from ticks FIRST (moved up)
-  const availableSymbols = useMemo(() => {
-    const symbols = new Set(ticks.map((t) => t.symbol).filter(Boolean));
-    // If no symbols from WebSocket, provide default options
-    const defaultSymbols = ['BTCUSDT', 'ETHUSDT', 'TESTBTC', 'ADAUSDT', 'SOLUSDT'];
-    return symbols.size > 0 ? Array.from(symbols).sort() : defaultSymbols;
-  }, [ticks]);
-
-  // Control Panel State (start with BTCUSDT, will auto-update)
+  // Control Panel State
   const { config, setConfig } = useControlPanel({
     symbols: ['BTCUSDT'],
-    timeframe: '1m',
+    timeframe: '1s',
     rollingWindow: 50,
     analytics: {
       spread: true,
@@ -52,132 +53,214 @@ export default function DashboardPage() {
     },
   });
 
+  const selectedSymbol = config.symbols[0] || 'BTCUSDT';
+  const selectedTimeframe = config.timeframe;
+
   // UI State
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Auto-switch to first available symbol when ticks arrive
-  useEffect(() => {
-    if (ticks.length > 0 && availableSymbols.length > 0) {
-      const currentSymbol = config.symbols[0];
-      // If current symbol has no data, switch to first available
-      const hasDataForCurrentSymbol = ticks.some(t => t.symbol === currentSymbol);
-      
-      if (!hasDataForCurrentSymbol) {
-        // Find the most common symbol in ticks
-        const symbolCounts: Record<string, number> = {};
-        ticks.forEach(tick => {
-          symbolCounts[tick.symbol] = (symbolCounts[tick.symbol] || 0) + 1;
-        });
-        const mostCommonSymbol = Object.entries(symbolCounts)
-          .sort((a, b) => b[1] - a[1])[0]?.[0];
-        
-        if (mostCommonSymbol && mostCommonSymbol !== currentSymbol) {
-          console.log(`Auto-switching from ${currentSymbol} to ${mostCommonSymbol} (has data)`);
-          setConfig({
-            ...config,
-            symbols: [mostCommonSymbol],
-          });
-        }
-      }
-    }
-  }, [ticks.length, availableSymbols]); // Only run when tick count or available symbols change
+  // ========================================================================
+  // API QUERIES - FETCH DATA FROM BACKEND
+  // ========================================================================
+  
+  // Fetch symbols from API (replaces hard-coded list)
+  const { 
+    data: symbolsData, 
+    isLoading: symbolsLoading,
+    error: symbolsError 
+  } = useSymbols();
+  
+  // Fetch historical ticks for selected symbol
+  const { 
+    data: historicalTicks,
+    isLoading: ticksLoading,
+    error: ticksError 
+  } = useTicks(
+    { symbol: selectedSymbol, limit: 100 },
+    { enabled: !!selectedSymbol }
+  );
+  
+  // Fetch alerts from API (replaces 'N/A' display)
+  const { 
+    data: apiAlerts,
+    isLoading: alertsLoading,
+    error: alertsError 
+  } = useAlerts();
 
-  // Use first symbol from control panel config
-  const selectedSymbol = config.symbols[0] || 'BTCUSDT';
-  const selectedTimeframe = config.timeframe;
+  // Get invalidation functions for refresh
+  const invalidate = useInvalidateMarketData();
+
+  // ========================================================================
+  // DATA PROCESSING
+  // ========================================================================
+  
+  // Get available symbols from API
+  const availableSymbols = useMemo(() => {
+    if (symbolsData && symbolsData.length > 0) {
+      return symbolsData.map(s => s.symbol).sort();
+    }
+    // Fallback to WebSocket symbols
+    const wsSymbols = new Set(wsTicks.map((t) => t.symbol).filter(Boolean));
+    if (wsSymbols.size > 0) {
+      return Array.from(wsSymbols).sort();
+    }
+    // Last resort: default symbols
+    return ['BTCUSDT', 'ETHUSDT', 'TESTBTC', 'ADAUSDT', 'SOLUSDT'];
+  }, [symbolsData, wsTicks]);
+
+  // Merge historical + WebSocket ticks (hybrid data flow)
+  const allTicks = useMemo(() => {
+    const merged: Tick[] = [];
+    const tickMap = new Map<string, Tick>();
+
+    // Add historical ticks first
+    if (historicalTicks) {
+      historicalTicks.forEach(tick => {
+        const key = `${tick.timestamp}-${tick.price}`;
+        tickMap.set(key, tick);
+      });
+    }
+
+    // Add WebSocket ticks (converting format)
+    wsTicks
+      .filter(t => t.symbol === selectedSymbol)
+      .forEach(wsTick => {
+        const tick: Tick = {
+          id: Date.now() + Math.random(), // Temporary ID
+          symbol: wsTick.symbol,
+          price: wsTick.price,
+          quantity: wsTick.quantity,
+          timestamp: wsTick.timestamp,
+          created_at: wsTick.timestamp,
+        };
+        const key = `${tick.timestamp}-${tick.price}`;
+        tickMap.set(key, tick);
+      });
+
+    // Convert to array and sort by timestamp
+    return Array.from(tickMap.values())
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .slice(-config.rollingWindow * 2); // Keep 2x rolling window for aggregation
+  }, [historicalTicks, wsTicks, selectedSymbol, config.rollingWindow]);
+
+  // ========================================================================
+  // AUTO-SWITCH TO FIRST AVAILABLE SYMBOL
+  // ========================================================================
+  
+  useEffect(() => {
+    if (availableSymbols.length > 0 && !availableSymbols.includes(selectedSymbol)) {
+      console.log(`Switching to first available symbol: ${availableSymbols[0]}`);
+      setConfig({
+        ...config,
+        symbols: [availableSymbols[0]],
+      });
+    }
+  }, [availableSymbols, selectedSymbol]);
+
+  // ========================================================================
+  // AGGREGATED DATA FOR CHARTS
+  // ========================================================================
+  
+  const { chartData, stats, isLoading: isAggregating } = useAggregatedTicks({
+    ticks: allTicks,
+    symbol: selectedSymbol,
+    timeframe: selectedTimeframe,
+  });
+
+  // ========================================================================
+  // RECENT DATA FOR TABLES
+  // ========================================================================
+  
+  // Recent ticks - limit by rolling window
+  const recentTicks = useMemo(() => {
+    return allTicks
+      .slice(-config.rollingWindow)
+      .reverse()
+      .slice(0, 10); // Show last 10 ticks
+  }, [allTicks, config.rollingWindow]);
+
+  // Recent alerts - from API, not WebSocket only
+  const recentAlerts = useMemo(() => {
+    if (apiAlerts && apiAlerts.length > 0) {
+      return apiAlerts
+        .filter(a => a.is_active)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 5);
+    }
+    // Fallback to WebSocket alerts
+    return wsAlerts.slice(0, 5);
+  }, [apiAlerts, wsAlerts]);
+
+  // ========================================================================
+  // EVENT HANDLERS
+  // ========================================================================
+  
+  const handleConfigChange = useCallback((newConfig: ControlPanelConfig) => {
+    setConfig(newConfig);
+  }, [setConfig]);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    toast.info('Refreshing dashboard data...');
+    
+    try {
+      // Use React Query invalidation for proper refresh
+      await invalidate.refetchAll();
+      toast.success('Dashboard refreshed successfully!');
+    } catch (error) {
+      toast.error('Failed to refresh dashboard');
+      console.error('Refresh error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [invalidate]);
+
+  const handleExport = () => {
+    if (allTicks.length === 0) {
+      toast.error('No data to export');
+      return;
+    }
+
+    const from = selectedSymbol;
+    const to = selectedTimeframe;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    
+    const csvContent = [
+      ['Timestamp', 'Symbol', 'Price', 'Quantity'].join(','),
+      ...allTicks.map((tick) =>
+        [tick.timestamp, tick.symbol, tick.price, tick.quantity].join(',')
+      )
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quantify-export-${from}-${timestamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    toast.success('Data exported successfully!');
+  };
 
   // Debug logging
   useEffect(() => {
     console.log('Dashboard Update:', {
       connected: isConnected,
-      tickCount: ticks.length,
-      symbols: [...new Set(ticks.map(t => t.symbol))],
+      historicalTickCount: historicalTicks?.length || 0,
+      wsTickCount: wsTicks.length,
+      mergedTickCount: allTicks.length,
+      symbols: availableSymbols,
       selectedSymbol,
+      selectedTimeframe,
+      chartDataPoints: chartData.length,
       analyticsAvailable: !!analytics,
-      alertCount: alerts.length,
+      alertCount: recentAlerts.length,
+      rollingWindow: config.rollingWindow,
     });
-  }, [ticks, analytics, alerts, isConnected, selectedSymbol]);
-
-  // Filter ticks by selected symbol
-  const symbolTicks = useMemo(() => {
-    return ticks.filter((t) => t.symbol === selectedSymbol).slice(0, 50);
-  }, [ticks, selectedSymbol]);
-
-  // Calculate stats
-  const stats = useMemo(() => {
-    if (symbolTicks.length === 0) {
-      return {
-        currentPrice: 0,
-        change24h: 0,
-        high24h: 0,
-        low24h: 0,
-        volume24h: 0,
-        tickCount: 0,
-      };
-    }
-
-    const prices = symbolTicks.map((t) => t.price).filter((p) => typeof p === 'number');
-    const volumes = symbolTicks.map((t) => t.quantity).filter((v) => typeof v === 'number');
-
-    return {
-      currentPrice: prices[0] || 0,
-      change24h: prices.length > 1 ? ((prices[0] - prices[prices.length - 1]) / prices[prices.length - 1]) * 100 : 0,
-      high24h: Math.max(...prices),
-      low24h: Math.min(...prices),
-      volume24h: volumes.reduce((a, b) => a + b, 0),
-      tickCount: symbolTicks.length,
-    };
-  }, [symbolTicks]);
-
-  // Control Panel Handlers
-  const handleConfigChange = (newConfig: ControlPanelConfig) => {
-    setConfig(newConfig);
-    toast.info('Configuration Updated', {
-      description: `Updated to ${newConfig.symbols.join(', ')} @ ${newConfig.timeframe}`,
-    });
-  };
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    toast.info('Refreshing data...', {
-      description: 'Reconnecting to WebSocket and fetching latest data',
-    });
-    
-    // Simulate refresh (in real implementation, this would trigger WebSocket reconnect)
-    setTimeout(() => {
-      setIsRefreshing(false);
-      toast.success('Data refreshed successfully');
-    }, 1500);
-  };
-
-  const handleExport = (dateRange: { from: Date; to: Date }) => {
-    const from = dateRange.from.toLocaleDateString();
-    const to = dateRange.to.toLocaleDateString();
-    
-    toast.success('Exporting CSV', {
-      description: `Exporting ${config.symbols.join(', ')} data from ${from} to ${to}`,
-    });
-    
-    // Create CSV content
-    const csvContent = [
-      ['Symbol', 'Timestamp', 'Price', 'Quantity'].join(','),
-      ...symbolTicks.map(tick => 
-        [tick.symbol, new Date(tick.timestamp).toISOString(), tick.price, tick.quantity].join(',')
-      )
-    ].join('\n');
-    
-    // Download CSV
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `quantify-export-${from}-to-${to}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-  };
+  }, [allTicks.length, selectedSymbol, selectedTimeframe, chartData.length, analytics, recentAlerts.length, config.rollingWindow, isConnected]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -234,16 +317,16 @@ export default function DashboardPage() {
         <div className="px-4 py-2 bg-muted/50 text-xs space-y-1">
           <div className="flex gap-4 flex-wrap">
             <span>🔌 Connected: {isConnected ? '✅' : '❌'}</span>
-            <span>📊 Ticks: {ticks.length}</span>
+            <span>📊 Ticks: {allTicks.length}</span>
             <span>🎯 Symbol: {selectedSymbol}</span>
-            <span>🔍 Filtered: {symbolTicks.length}</span>
+            <span>🔍 Recent: {recentTicks.length}</span>
             <span>📈 Analytics: {analytics ? '✅' : '❌'}</span>
-            <span>🔔 Alerts: {alerts.length}</span>
+            <span>🔔 Alerts: {recentAlerts.length}</span>
           </div>
-          {ticks.length > 0 && (
+          {allTicks.length > 0 && (
             <div className="text-muted-foreground">
-              Latest: {ticks[0]?.symbol} @ ${ticks[0]?.price?.toFixed(2)} 
-              {ticks[0]?.timestamp && ` (${new Date(ticks[0].timestamp).toLocaleTimeString()})`}
+              Latest: {allTicks[allTicks.length - 1]?.symbol} @ ${allTicks[allTicks.length - 1]?.price?.toFixed(2)} 
+              {allTicks[allTicks.length - 1]?.timestamp && ` (${new Date(allTicks[allTicks.length - 1].timestamp).toLocaleTimeString()})`}
             </div>
           )}
         </div>
@@ -270,7 +353,7 @@ export default function DashboardPage() {
               <CardContent className="space-y-2 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Ticks</span>
-                  <span className="font-mono">{ticks.length}</span>
+                  <span className="font-mono">{allTicks.length}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Symbols</span>
@@ -282,7 +365,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Alerts</span>
-                  <span className="font-mono">{alerts.length}</span>
+                  <span className="font-mono">{recentAlerts.length}</span>
                 </div>
               </CardContent>
             </Card>
@@ -368,7 +451,7 @@ export default function DashboardPage() {
                 <PriceChart
                   symbol={selectedSymbol}
                   timeframe={selectedTimeframe}
-                  data={ticks}
+                  data={chartData}
                   className="h-[350px]"
                 />
               </CardContent>
@@ -381,7 +464,7 @@ export default function DashboardPage() {
                   <VolumeChart
                     symbol={selectedSymbol}
                     timeframe={selectedTimeframe}
-                    data={ticks}
+                    data={chartData}
                     className="h-[350px]"
                   />
                 </CardContent>
@@ -431,8 +514,8 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {symbolTicks.length > 0 ? (
-                      symbolTicks.slice(0, 10).map((tick, idx) => {
+                    {recentTicks.length > 0 ? (
+                      recentTicks.map((tick, idx) => {
                         if (!tick || !tick.symbol || typeof tick.price !== 'number') {
                           return null;
                         }
@@ -440,7 +523,7 @@ export default function DashboardPage() {
                         const value = tick.price * (tick.quantity ?? 0);
 
                         return (
-                          <tr key={idx} className="border-b border-border/50 hover:bg-muted/30">
+                          <tr key={`${tick.id}-${idx}`} className="border-b border-border/50 hover:bg-muted/30">
                             <td className="py-2 px-2 text-muted-foreground font-mono text-xs">
                               {tick.timestamp
                                 ? new Date(tick.timestamp).toLocaleTimeString()
@@ -462,7 +545,7 @@ export default function DashboardPage() {
                     ) : (
                       <tr>
                         <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                          {isConnected
+                          {ticksLoading ? 'Loading ticks...' : isConnected
                             ? 'Waiting for tick data...'
                             : 'Connect to receive data'}
                         </td>
@@ -475,41 +558,79 @@ export default function DashboardPage() {
           </Card>
 
           {/* Alerts Section */}
-          {alerts.length > 0 && (
+          {recentAlerts.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-accent" />
-                  Recent Alerts ({alerts.length})
+                  Recent Alerts ({recentAlerts.length})
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {alerts.slice(0, 5).map((alert, idx) => {
-                    if (!alert || !alert.alert_type) return null;
+                  {recentAlerts.map((alert) => {
+                    if (!alert || !alert.symbol) return null;
+
+                    // Handle both API alerts and WebSocket alerts
+                    const isAPIAlert = 'id' in alert;
+                    const alertType = isAPIAlert 
+                      ? (alert.condition_type || alert.condition || 'Alert')
+                      : (alert.alert_type || 'Alert');
+                    const displayMessage = isAPIAlert
+                      ? (alert.message || `${alert.symbol} - ${alert.condition} ${alert.threshold}`)
+                      : (alert.message || `${alert.symbol} alert`);
+                    const severityColor = (isAPIAlert ? alert.severity : alert.severity) === 'high' 
+                      ? 'red' 
+                      : (isAPIAlert ? alert.severity : alert.severity) === 'medium' 
+                      ? 'yellow' 
+                      : 'blue';
+                    const triggerCount = isAPIAlert ? (alert.trigger_count || 0) : 0;
+                    const alertKey = isAPIAlert ? alert.id : `${alert.alert_id}-${alert.timestamp}`;
+                    const alertTime = isAPIAlert 
+                      ? (alert.last_triggered || alert.created_at)
+                      : (alert.triggered_at || alert.timestamp);
 
                     return (
                       <div
-                        key={idx}
-                        className="flex items-center justify-between p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg"
+                        key={alertKey}
+                        className={`flex items-center justify-between p-3 bg-${severityColor}-500/10 border border-${severityColor}-500/30 rounded-lg`}
                       >
                         <div className="flex-1">
-                          <div className="text-sm font-medium text-yellow-600">
-                            {alert.alert_type}
+                          <div className="flex items-center gap-2">
+                            <div className={`text-sm font-medium text-${severityColor}-600`}>
+                              {alertType}
+                            </div>
+                            <Badge variant="secondary" className="text-xs">
+                              {alert.symbol}
+                            </Badge>
+                            {triggerCount > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {triggerCount}x
+                              </Badge>
+                            )}
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {alert.message || 'No message'}
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {displayMessage}
                           </div>
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {alert.timestamp
-                            ? new Date(alert.timestamp).toLocaleTimeString()
+                          {alertTime
+                            ? new Date(alertTime).toLocaleTimeString()
                             : 'N/A'}
                         </div>
                       </div>
                     );
                   })}
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Loading/Empty States */}
+          {alertsLoading && (
+            <Card>
+              <CardContent className="py-8 text-center text-muted-foreground">
+                Loading alerts...
               </CardContent>
             </Card>
           )}
