@@ -36,3 +36,29 @@ dist/
 eggs/
 parts/
 bin/
+
+# ===== Python standard ignores =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+.env
+.venv
+env/
+venv/
+build/
+dist/
+.DS_Store
+
+# ===== Ignore all Markdown files except README.md =====
+*.md
+!README.md
+
+# ===== Ignore all files starting with test_ =====
+test_*
+demo_*
+sample_*
+example_*
+
