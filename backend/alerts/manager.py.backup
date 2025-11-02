@@ -1,0 +1,800 @@
+""""""
+
+Alert Manager for Real-time Trading AlertsAlert Manager for Real-time Trading Alerts
+
+Monitors conditions and triggers alerts every 5 secondsMonitors conditions and triggers alerts every 5 seconds
+
+""""""
+
+
+
+import asyncioimport asyncio
+
+import jsonimport json
+
+import loggingimport logging
+
+from typing import Dict, List, Callable, Optional, Anyfrom typing import Dict, List, Set, Callable, Optional, Any
+
+from datetime import datetime, timedeltafrom datetime import datetime, timedelta
+
+from decimal import Decimalfrom decimal import Decimal
+
+
+
+from sqlalchemy import select, and_from sqlalchemy import select, and_, or_
+
+from sqlalchemy.ext.asyncio import AsyncSessionfrom sqlalchemy.ext.asyncio import AsyncSession
+
+
+
+from database.connection import database_managerfrom database.connection import database_manager
+
+from database.models import Alerts, AlertHistory, RawTicks, AnalyticsResultsfrom database.models import Alerts, AlertHistory, RawTicks, AnalyticsResults
+
+from config import settingsfrom config import settings
+
+
+
+logger = logging.getLogger(__name__)logger = logging.getLogger(__name__)
+
+
+
+
+
+class AlertManager:class AlertManager:
+
+    """    """
+
+    Manages real-time alert monitoring and triggering    Manages real-time alert monitoring and triggering
+
+        
+
+    Features:    Features:
+
+    - Checks alert conditions every 5 seconds    - Checks alert conditions every 5 seconds
+
+    - Supports: zscore_above, zscore_below, price_above, price_below    - Supports: zscore_above, zscore_below, price_above, price_below
+
+    - Stores triggered alerts in AlertHistory    - Stores triggered alerts in AlertHistory
+
+    - Broadcasts to WebSocket subscribers    - Broadcasts to WebSocket subscribers
+
+    - Cooldown period to prevent spam (default: 60 seconds)    - Cooldown period to prevent spam (default: 60 seconds)
+
+    """    """
+
+        
+
+    # Alert condition types    # Alert condition types
+
+    CONDITION_ZSCORE_ABOVE = "zscore_above"    CONDITION_ZSCORE_ABOVE = "zscore_above"
+
+    CONDITION_ZSCORE_BELOW = "zscore_below"    CONDITION_ZSCORE_BELOW = "zscore_below"
+
+    CONDITION_PRICE_ABOVE = "price_above"    CONDITION_PRICE_ABOVE = "price_above"
+
+    CONDITION_PRICE_BELOW = "price_below"    CONDITION_PRICE_BELOW = "price_below"
+
+    CONDITION_ABOVE = "above"    
+
+    CONDITION_BELOW = "below"    # Supported conditions
+
+        SUPPORTED_CONDITIONS = [
+
+    # Supported conditions        CONDITION_ZSCORE_ABOVE,
+
+    SUPPORTED_CONDITIONS = [        CONDITION_ZSCORE_BELOW,
+
+        CONDITION_ZSCORE_ABOVE,        CONDITION_PRICE_ABOVE,
+
+        CONDITION_ZSCORE_BELOW,        CONDITION_PRICE_BELOW,
+
+        CONDITION_PRICE_ABOVE,    ]
+
+        CONDITION_PRICE_BELOW,    
+
+        CONDITION_ABOVE,    def __init__(self, check_interval: int = 5, cooldown_seconds: int = 60):
+
+        CONDITION_BELOW,        """
+
+    ]        Initialize AlertManager
+
+            
+
+    def __init__(self, check_interval: int = 5, cooldown_seconds: int = 60):        Args:
+
+        """            check_interval: Seconds between alert checks (default: 5)
+
+        Initialize AlertManager            cooldown_seconds: Seconds before same alert can trigger again (default: 60)
+
+                """
+
+        Args:        self.check_interval = check_interval
+
+            check_interval: Seconds between alert checks (default: 5)        self.cooldown_seconds = cooldown_seconds
+
+            cooldown_seconds: Seconds before same alert can trigger again (default: 60)        
+
+        """        # Active alerts cache {alert_id: alert_object}
+
+        self.check_interval = check_interval        self.active_alerts: Dict[int, Alerts] = {}
+
+        self.cooldown_seconds = cooldown_seconds        
+
+                # Alert cooldown tracking {alert_id: last_triggered_time}
+
+        # Active alerts cache {alert_id: alert_object}        self.alert_cooldowns: Dict[int, datetime] = {}
+
+        self.active_alerts: Dict[int, Alerts] = {}        
+
+                # WebSocket subscribers {channel: [callback_functions]}
+
+        # Alert cooldown tracking {alert_id: last_triggered_time}        self.websocket_subscribers: Dict[str, List[Callable]] = {}
+
+        self.alert_cooldowns: Dict[int, datetime] = {}        
+
+                # Monitoring task
+
+        # WebSocket subscribers {channel: [callback_functions]}        self.monitoring_task: Optional[asyncio.Task] = None
+
+        self.websocket_subscribers: Dict[str, List[Callable]] = {}        self.is_running = False
+
+                
+
+        # Monitoring task        # Statistics
+
+        self.monitoring_task: Optional[asyncio.Task] = None        self.stats = {
+
+        self.is_running = False            "checks_performed": 0,
+
+                    "alerts_triggered": 0,
+
+        # Statistics            "alerts_in_cooldown": 0,
+
+        self.stats = {            "last_check_time": None,
+
+            "checks_performed": 0,        }
+
+            "alerts_triggered": 0,    
+
+            "alerts_in_cooldown": 0,    async def start(self):
+
+            "last_check_time": None,        """Start alert monitoring"""
+
+        }        if self.is_running:
+
+                logger.warning("Alert manager already running")
+
+    async def start(self):            return
+
+        """Start alert monitoring"""        
+
+        if self.is_running:        self.is_running = True
+
+            logger.warning("Alert manager already running")        
+
+            return        # Load active alerts from database
+
+                await self._load_active_alerts()
+
+        self.is_running = True        
+
+                # Start monitoring task
+
+        # Load active alerts from database        self.monitoring_task = asyncio.create_task(self._monitor_alerts_loop())
+
+        await self._load_active_alerts()        
+
+                logger.info(
+
+        # Start monitoring task            f"🔔 Alert manager started - "
+
+        self.monitoring_task = asyncio.create_task(self._monitor_alerts_loop())            f"Check interval: {self.check_interval}s, "
+
+                    f"Cooldown: {self.cooldown_seconds}s, "
+
+        logger.info(            f"Active alerts: {len(self.active_alerts)}"
+
+            f"🔔 Alert manager started - "        )
+
+            f"Check interval: {self.check_interval}s, "    
+
+            f"Cooldown: {self.cooldown_seconds}s, "    async def stop(self):
+
+            f"Active alerts: {len(self.active_alerts)}"        """Stop alert monitoring"""
+
+        )        self.is_running = False
+
+            
+
+    async def stop(self):        if self.monitoring_task:
+
+        """Stop alert monitoring"""            self.monitoring_task.cancel()
+
+        self.is_running = False            try:
+
+                        await self.monitoring_task
+
+        if self.monitoring_task:            except asyncio.CancelledError:
+
+            self.monitoring_task.cancel()                pass
+
+            try:        
+
+                await self.monitoring_task        logger.info("🔔 Alert manager stopped")
+
+            except asyncio.CancelledError:        
+
+                pass        logger.info("Alert manager stopped")
+
+            
+
+        logger.info("🔔 Alert manager stopped")    async def register_user_alert(self, alert_id: int):
+
+            """Register a new user alert"""
+
+    def subscribe_websocket(self, channel: str, callback: Callable):        try:
+
+        """            async for session in database_manager.get_session():
+
+        Subscribe to alert broadcasts on a WebSocket channel                user_alert = await session.get(Alerts, alert_id)
+
+                        if user_alert and user_alert.is_active:
+
+        Args:                    self.active_alerts[alert_id] = user_alert
+
+            channel: Channel name (e.g., 'alerts', 'alerts:BTCUSDT')                    logger.info(f"Registered user alert {alert_id}")
+
+            callback: Async function to call when alert is triggered                break
+
+        """        except Exception as e:
+
+        if channel not in self.websocket_subscribers:            logger.error(f"Error registering user alert {alert_id}: {e}")
+
+            self.websocket_subscribers[channel] = []    
+
+            async def unregister_user_alert(self, alert_id: int):
+
+        self.websocket_subscribers[channel].append(callback)        """Unregister a user alert"""
+
+        logger.info(f"📡 WebSocket subscribed to channel: {channel}")        if alert_id in self.active_alerts:
+
+                del self.active_alerts[alert_id]
+
+    def unsubscribe_websocket(self, channel: str, callback: Callable):            logger.info(f"Unregistered user alert {alert_id}")
+
+        """Unsubscribe from alert broadcasts"""    
+
+        if channel in self.websocket_subscribers:    def register_callback(self, name: str, callback: Callable):
+
+            try:        """Register alert callback"""
+
+                self.websocket_subscribers[channel].remove(callback)        self.alert_callbacks[name] = callback
+
+                logger.info(f"📡 WebSocket unsubscribed from channel: {channel}")        logger.info(f"Registered alert callback: {name}")
+
+            except ValueError:    
+
+                pass    async def trigger_alert(
+
+            self,
+
+    async def _load_active_alerts(self):        alert_type: str,
+
+        """Load active alerts from database"""        symbol: str,
+
+        try:        title: str,
+
+            async for session in database_manager.get_session():        message: str,
+
+                result = await session.execute(        severity: str = "medium",
+
+                    select(Alerts).where(Alerts.is_active == True)        threshold_value: Optional[float] = None,
+
+                )        actual_value: Optional[float] = None
+
+                alerts = result.scalars().all()    ):
+
+                        """Trigger a new alert"""
+
+                for alert in alerts:        try:
+
+                    self.active_alerts[alert.id] = alert            # Create alert record
+
+                            alert = Alerts(
+
+                logger.info(f"✅ Loaded {len(self.active_alerts)} active alerts")                alert_type=alert_type,
+
+                break                symbol=symbol,
+
+                                condition=title,
+
+        except Exception as e:                message=message,
+
+            logger.error(f"❌ Error loading active alerts: {e}", exc_info=True)                severity=severity,
+
+                    threshold=threshold_value,
+
+    async def reload_alerts(self):                actual_value=actual_value,
+
+        """Reload alerts from database (useful after adding/updating alerts)"""                triggered_at=datetime.utcnow()
+
+        self.active_alerts.clear()            )
+
+        await self._load_active_alerts()            
+
+                # Store in database
+
+    async def _monitor_alerts_loop(self):            async for session in database_manager.get_session():
+
+        """Main monitoring loop - checks alerts every 5 seconds"""                session.add(alert)
+
+        logger.info(f"🔄 Starting alert monitoring loop (every {self.check_interval}s)")                await session.commit()
+
+                        await session.refresh(alert)
+
+        while self.is_running:                break
+
+            try:            
+
+                start_time = datetime.now()            # Call registered callbacks
+
+                            await self._call_alert_callbacks(alert)
+
+                # Check all active alerts            
+
+                checked_count = 0            logger.info(f"Alert triggered: {alert_type} for {symbol}")
+
+                triggered_count = 0            
+
+                cooldown_count = 0        except Exception as e:
+
+                            logger.error(f"Error triggering alert: {e}")
+
+                for alert_id, alert in list(self.active_alerts.items()):    
+
+                    try:    async def _load_user_alerts(self):
+
+                        # Check if in cooldown        """Load active user alerts from database"""
+
+                        if self._is_in_cooldown(alert_id):        try:
+
+                            cooldown_count += 1            async for session in database_manager.get_session():
+
+                            continue                result = await session.execute(
+
+                                            text("SELECT * FROM alerts WHERE is_active = true")
+
+                        # Check alert condition                )
+
+                        triggered = await self._check_alert_condition(alert)                user_alerts = result.fetchall()
+
+                        checked_count += 1                
+
+                                        for alert_data in user_alerts:
+
+                        if triggered:                    user_alert = Alerts(**dict(alert_data))
+
+                            triggered_count += 1                    self.active_alerts[user_alert.id] = user_alert
+
+                                            
+
+                    except Exception as e:                logger.info(f"Loaded {len(self.active_alerts)} active user alerts")
+
+                        logger.error(f"Error checking alert {alert_id}: {e}")                break
+
+                                
+
+                # Update stats        except Exception as e:
+
+                elapsed = (datetime.now() - start_time).total_seconds()            logger.error(f"Error loading user alerts: {e}")
+
+                self.stats["checks_performed"] += checked_count    
+
+                self.stats["alerts_in_cooldown"] = cooldown_count    async def _monitor_alerts(self):
+
+                self.stats["last_check_time"] = datetime.now()        """Main monitoring loop"""
+
+                        while self.is_running:
+
+                if checked_count > 0:            try:
+
+                    logger.debug(                # Check each active alert
+
+                        f"⏱️  Alert check cycle: {checked_count} checked, "                for alert_id, user_alert in self.active_alerts.items():
+
+                        f"{triggered_count} triggered, {cooldown_count} in cooldown "                    await self._check_user_alert(user_alert)
+
+                        f"({elapsed:.2f}s)"                
+
+                    )                # Sleep between checks
+
+                                await asyncio.sleep(10)  # Check every 10 seconds
+
+                # Wait before next check                
+
+                await asyncio.sleep(self.check_interval)            except asyncio.CancelledError:
+
+                                break
+
+            except asyncio.CancelledError:            except Exception as e:
+
+                logger.info("Alert monitoring loop cancelled")                logger.error(f"Error in alert monitoring: {e}")
+
+                break                await asyncio.sleep(5)
+
+            except Exception as e:    
+
+                logger.error(f"❌ Error in alert monitoring loop: {e}", exc_info=True)    async def _check_user_alert(self, user_alert: Alerts):
+
+                await asyncio.sleep(5)  # Wait before retrying        """Check if a user alert should be triggered"""
+
+            try:
+
+    def _is_in_cooldown(self, alert_id: int) -> bool:            # Check cooldown
+
+        """Check if alert is in cooldown period"""            if self._is_in_cooldown(user_alert.id):
+
+        if alert_id not in self.alert_cooldowns:                return
+
+            return False            
+
+                    # Get current value based on alert type
+
+        last_triggered = self.alert_cooldowns[alert_id]            current_value = await self._get_current_value(user_alert)
+
+        elapsed = (datetime.now() - last_triggered).total_seconds()            
+
+                    if current_value is None:
+
+        return elapsed < self.cooldown_seconds                return
+
+                
+
+    async def _check_alert_condition(self, alert: Alerts) -> bool:            # Check condition
+
+        """            should_trigger = self._evaluate_condition(
+
+        Check if alert condition is met                current_value,
+
+                        user_alert.condition,
+
+        Returns:                user_alert.threshold
+
+            True if alert was triggered, False otherwise            )
+
+        """            
+
+        try:            if should_trigger:
+
+            # Get current value based on alert type                await self._trigger_user_alert(user_alert, current_value)
+
+            if alert.alert_type == "price":                
+
+                current_value = await self._get_current_price(alert.symbol)        except Exception as e:
+
+            elif alert.alert_type == "z_score" or alert.alert_type == "zscore":            logger.error(f"Error checking user alert {user_alert.id}: {e}")
+
+                current_value = await self._get_current_zscore(alert.symbol)    
+
+            else:    async def _get_current_value(self, user_alert: Alerts) -> Optional[float]:
+
+                # Default to price        """Get current value for alert evaluation"""
+
+                current_value = await self._get_current_price(alert.symbol)        try:
+
+                        if user_alert.alert_type == "price":
+
+            if current_value is None:                # Get latest price
+
+                return False                async for session in database_manager.get_session():
+
+                                result = await session.execute(
+
+            # Evaluate condition                        f"SELECT price FROM tick_data WHERE symbol = '{user_alert.symbol}' "
+
+            condition_met = self._evaluate_condition(                        f"ORDER BY timestamp DESC LIMIT 1"
+
+                alert.condition,                    )
+
+                current_value,                    row = result.fetchone()
+
+                float(alert.threshold)                    return row[0] if row else None
+
+            )            
+
+                        elif user_alert.alert_type == "z_score":
+
+            if condition_met:                # Calculate Z-score (assuming symbol format like "BTCUSDT-ETHUSDT")
+
+                await self._trigger_alert(alert, current_value)                if "-" in user_alert.symbol:
+
+                return True                    symbol1, symbol2 = user_alert.symbol.split("-")
+
+                                z_score = await analytics_engine.calculate_spread_zscore(symbol1, symbol2)
+
+            return False                    return z_score
+
+                        
+
+        except Exception as e:            elif user_alert.alert_type == "volatility":
+
+            logger.error(f"Error checking alert condition for {alert.id}: {e}")                volatility = await analytics_engine.calculate_volatility(user_alert.symbol)
+
+            return False                return volatility
+
+                
+
+    async def _get_current_price(self, symbol: str) -> Optional[float]:            # Add more alert types as needed
+
+        """Get current price for a symbol"""            return None
+
+        try:            
+
+            async for session in database_manager.get_session():        except Exception as e:
+
+                result = await session.execute(            logger.error(f"Error getting current value: {e}")
+
+                    select(RawTicks.price)            return None
+
+                    .where(RawTicks.symbol == symbol)    
+
+                    .order_by(RawTicks.timestamp.desc())    def _evaluate_condition(self, current_value: float, condition: str, threshold: float) -> bool:
+
+                    .limit(1)        """Evaluate alert condition"""
+
+                )        if condition == "greater_than":
+
+                price = result.scalar_one_or_none()            return current_value > threshold
+
+                        elif condition == "less_than":
+
+                if price:            return current_value < threshold
+
+                    return float(price)        elif condition == "equals":
+
+                            return abs(current_value - threshold) < 0.0001
+
+                break        elif condition == "not_equals":
+
+                            return abs(current_value - threshold) >= 0.0001
+
+        except Exception as e:        else:
+
+            logger.error(f"Error getting current price for {symbol}: {e}")            return False
+
+            
+
+        return None    async def _trigger_user_alert(self, user_alert: Alerts, current_value: float):
+
+            """Trigger a user-defined alert"""
+
+    async def _get_current_zscore(self, symbol_pair: str) -> Optional[float]:        try:
+
+        """            # Set cooldown
+
+        Get current z-score from analytics results            self.alert_cooldowns[user_alert.id] = datetime.utcnow()
+
+                    
+
+        Args:            # Update last triggered time
+
+            symbol_pair: Format "BTCUSDT-ETHUSDT" or just "BTCUSDT" (will look for any pair)            async for session in database_manager.get_session():
+
+        """                user_alert.last_triggered = datetime.utcnow()
+
+        try:                await session.commit()
+
+            async for session in database_manager.get_session():                break
+
+                # Try to get most recent z-score for this symbol pair            
+
+                result = await session.execute(            # Create alert message
+
+                    select(AnalyticsResults.z_score)            title = f"{user_alert.alert_type.title()} Alert: {user_alert.symbol}"
+
+                    .where(AnalyticsResults.symbol_pair.like(f"%{symbol_pair}%"))            message = (
+
+                    .order_by(AnalyticsResults.timestamp.desc())                f"{user_alert.symbol} {user_alert.alert_type} is {current_value:.4f}, "
+
+                    .limit(1)                f"which is {user_alert.condition} threshold {user_alert.threshold:.4f}"
+
+                )            )
+
+                zscore = result.scalar_one_or_none()            
+
+                            # Determine severity based on how far from threshold
+
+                if zscore:            severity = self._calculate_severity(current_value, user_alert.threshold, user_alert.condition)
+
+                    return float(zscore)            
+
+                            # Trigger alert
+
+                break            await self.trigger_alert(
+
+                                alert_type=user_alert.alert_type,
+
+        except Exception as e:                symbol=user_alert.symbol,
+
+            logger.error(f"Error getting z-score for {symbol_pair}: {e}")                title=title,
+
+                        message=message,
+
+        return None                severity=severity,
+
+                    threshold_value=user_alert.threshold,
+
+    def _evaluate_condition(self, condition: str, current_value: float, threshold: float) -> bool:                actual_value=current_value
+
+        """Evaluate if condition is met"""            )
+
+        condition = condition.lower()            
+
+                except Exception as e:
+
+        if condition in ["above", "price_above", "zscore_above", "greater_than", "gt"]:            logger.error(f"Error triggering user alert: {e}")
+
+            return current_value > threshold    
+
+        elif condition in ["below", "price_below", "zscore_below", "less_than", "lt"]:    def _is_in_cooldown(self, alert_id: int) -> bool:
+
+            return current_value < threshold        """Check if alert is in cooldown period"""
+
+        elif condition in ["equals", "eq"]:        if alert_id not in self.alert_cooldowns:
+
+            return abs(current_value - threshold) < 0.0001            return False
+
+        elif condition in ["crosses_above"]:        
+
+            # Would need historical data to check if crossed        last_triggered = self.alert_cooldowns[alert_id]
+
+            return current_value > threshold        cooldown_period = timedelta(seconds=settings.ALERT_COOLDOWN_SECONDS)
+
+        elif condition in ["crosses_below"]:        
+
+            return current_value < threshold        return datetime.utcnow() - last_triggered < cooldown_period
+
+        else:    
+
+            logger.warning(f"Unknown condition: {condition}")    def _calculate_severity(self, current_value: float, threshold: float, condition: str) -> str:
+
+            return False        """Calculate alert severity based on deviation from threshold"""
+
+            if condition in ["greater_than", "less_than"]:
+
+    async def _trigger_alert(self, alert: Alerts, current_value: float):            deviation = abs(current_value - threshold) / threshold
+
+        """Trigger an alert - store in history and broadcast"""            
+
+        try:            if deviation > 0.1:  # 10% deviation
+
+            # Set cooldown                return "high"
+
+            self.alert_cooldowns[alert.id] = datetime.now()            elif deviation > 0.05:  # 5% deviation
+
+                            return "medium"
+
+            # Create alert history record            else:
+
+            alert_history = AlertHistory(                return "low"
+
+                alert_id=alert.id,        
+
+                symbol=alert.symbol,        return "medium"
+
+                condition=alert.condition,    
+
+                threshold_value=alert.threshold,    async def _call_alert_callbacks(self, alert: Alerts):
+
+                actual_value=Decimal(str(current_value)),        """Call registered alert callbacks"""
+
+                triggered_at=datetime.now(),        for callback_name, callback in self.alert_callbacks.items():
+
+                market_conditions=json.dumps({            try:
+
+                    "current_value": current_value,                await callback(alert)
+
+                    "threshold": float(alert.threshold),            except Exception as e:
+
+                    "condition": alert.condition,                logger.error(f"Error in alert callback {callback_name}: {e}")
+
+                    "alert_type": alert.alert_type,
+
+                })
+
+            )# Global alert manager instance
+
+            alert_manager = AlertManager()
+            # Store in database
+            async for session in database_manager.get_session():
+                session.add(alert_history)
+                
+                # Update alert trigger count and last triggered time
+                result = await session.execute(
+                    select(Alerts).where(Alerts.id == alert.id)
+                )
+                db_alert = result.scalar_one_or_none()
+                
+                if db_alert:
+                    db_alert.last_triggered = datetime.now()
+                    db_alert.trigger_count = (db_alert.trigger_count or 0) + 1
+                
+                await session.commit()
+                await session.refresh(alert_history)
+                
+                break
+            
+            # Update stats
+            self.stats["alerts_triggered"] += 1
+            
+            # Prepare alert message
+            alert_message = {
+                "alert_id": alert.id,
+                "alert_history_id": alert_history.id,
+                "symbol": alert.symbol,
+                "alert_type": alert.alert_type,
+                "condition": alert.condition,
+                "threshold": float(alert.threshold),
+                "current_value": current_value,
+                "message": alert.message or f"{alert.symbol} {alert.condition} {alert.threshold}",
+                "severity": alert.severity,
+                "triggered_at": datetime.now().isoformat(),
+                "user_id": alert.user_id,
+                "strategy_name": alert.strategy_name,
+            }
+            
+            # Broadcast to WebSocket subscribers
+            await self._broadcast_alert(alert_message)
+            
+            logger.info(
+                f"🔔 ALERT TRIGGERED: {alert.symbol} {alert.condition} {alert.threshold} "
+                f"(current: {current_value:.4f}) - Severity: {alert.severity}"
+            )
+            
+        except Exception as e:
+            logger.error(f"❌ Error triggering alert {alert.id}: {e}", exc_info=True)
+    
+    async def _broadcast_alert(self, alert_message: Dict[str, Any]):
+        """Broadcast alert to all WebSocket subscribers"""
+        try:
+            # Broadcast to general alerts channel
+            if "alerts" in self.websocket_subscribers:
+                for callback in self.websocket_subscribers["alerts"]:
+                    try:
+                        await callback(alert_message)
+                    except Exception as e:
+                        logger.error(f"Error in WebSocket callback: {e}")
+            
+            # Broadcast to symbol-specific channel
+            symbol_channel = f"alerts:{alert_message['symbol']}"
+            if symbol_channel in self.websocket_subscribers:
+                for callback in self.websocket_subscribers[symbol_channel]:
+                    try:
+                        await callback(alert_message)
+                    except Exception as e:
+                        logger.error(f"Error in WebSocket callback: {e}")
+            
+            logger.debug(f"📡 Alert broadcasted to {len(self.websocket_subscribers)} channels")
+            
+        except Exception as e:
+            logger.error(f"Error broadcasting alert: {e}")
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get alert manager statistics"""
+        return {
+            **self.stats,
+            "active_alerts": len(self.active_alerts),
+            "alerts_in_cooldown": len([
+                aid for aid in self.alert_cooldowns
+                if self._is_in_cooldown(aid)
+            ]),
+            "is_running": self.is_running,
+            "check_interval": self.check_interval,
+            "cooldown_seconds": self.cooldown_seconds,
+        }
+
+
+# Global alert manager instance
+alert_manager = AlertManager()
