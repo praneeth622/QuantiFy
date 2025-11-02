@@ -17,7 +17,12 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files
-.env*
+.env
+.env.local
+.env.production
+.env.development
+# Keep .env.example for documentation
+!.env.example
 
 # vercel
 .vercel
@@ -52,13 +57,33 @@ build/
 dist/
 .DS_Store
 
-# ===== Ignore all Markdown files except README.md =====
+# ===== Ignore all Markdown files except important docs =====
 *.md
 !README.md
+!QUICKSTART*.md
+!ALERT_MANAGER_COMPLETE.md
+!IMPLEMENTATION_COMPLETE.md
+!VERIFICATION_CHECKLIST.md
+!WEBSOCKET_IMPLEMENTATION.md
+!WEBSOCKET_SUMMARY.md
+!COMPLETE_ANSWER.md
 
-# ===== Ignore all files starting with test_ =====
-test_*
+# ===== Ignore test files but keep test scripts we created =====
+test_*.py
+!test_websocket_client.py
+!test_alert_system.py
 demo_*
 sample_*
 example_*
+
+# ===== Database files =====
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ===== Log files =====
+*.log
+/tmp/
 
