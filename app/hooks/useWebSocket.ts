@@ -123,11 +123,26 @@ export const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketRet
           break;
 
         case 'tick':
-          const tickData = message.data as WebSocketTickData;
-          // Validate tick data before adding
-          if (tickData && tickData.symbol && typeof tickData.price === 'number') {
+          // Backend sends an array of ticks
+          const tickData = message.data;
+          
+          if (Array.isArray(tickData)) {
+            // Handle array of ticks
+            const validTicks = tickData.filter(
+              (tick: any) => tick && tick.symbol && typeof tick.price === 'number'
+            );
+            
+            if (validTicks.length > 0) {
+              setTicks((prev) => {
+                // Add all new ticks and keep last 100
+                const newTicks = [...validTicks, ...prev].slice(0, 100);
+                return newTicks;
+              });
+              log(`Received ${validTicks.length} ticks`);
+            }
+          } else if (tickData && tickData.symbol && typeof tickData.price === 'number') {
+            // Handle single tick object (legacy support)
             setTicks((prev) => {
-              // Keep last 100 ticks
               const newTicks = [tickData, ...prev].slice(0, 100);
               return newTicks;
             });
@@ -138,9 +153,18 @@ export const useWebSocket = (options: UseWebSocketOptions = {}): UseWebSocketRet
           break;
 
         case 'analytics':
-          const analyticsData = message.data as WebSocketAnalyticsData;
-          // Validate analytics data before setting
-          if (analyticsData && analyticsData.symbol_pair) {
+          // Backend sends an array of analytics
+          const analyticsData = message.data;
+          
+          if (Array.isArray(analyticsData) && analyticsData.length > 0) {
+            // Use the most recent analytics entry
+            const latestAnalytics = analyticsData[0];
+            if (latestAnalytics && latestAnalytics.symbol_pair) {
+              setAnalytics(latestAnalytics);
+              log('Analytics received:', latestAnalytics.symbol_pair);
+            }
+          } else if (analyticsData && analyticsData.symbol_pair) {
+            // Handle single analytics object (legacy support)
             setAnalytics(analyticsData);
             log('Analytics received:', analyticsData.symbol_pair);
           } else {
