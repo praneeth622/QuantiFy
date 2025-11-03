@@ -10,14 +10,14 @@ export default function SymbolSelector() {
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className="text-sm text-gray-400">Trading Symbol</Label>
+      <Label className="text-sm text-muted-foreground font-sans">Trading Symbol</Label>
       <Select value={selectedSymbol} onValueChange={setSelectedSymbol}>
-        <SelectTrigger className="w-[200px] bg-gray-900 border-gray-700">
+        <SelectTrigger className="w-[200px] bg-card border-border font-sans">
           <SelectValue placeholder="Select symbol" />
         </SelectTrigger>
-        <SelectContent className="bg-gray-900 border-gray-700">
+        <SelectContent className="bg-card border-border">
           {symbols.map((symbol) => (
-            <SelectItem key={symbol.symbol} value={symbol.symbol}>
+            <SelectItem key={symbol.symbol} value={symbol.symbol} className="font-sans">
               {symbol.symbol}
             </SelectItem>
           ))}

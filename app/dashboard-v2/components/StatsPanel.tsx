@@ -22,10 +22,23 @@ export default function StatsPanel() {
     const latestTick = ticks[0];
     const oldestTick = ticks[ticks.length - 1];
     
+    // Check if ticks are valid objects with price property
+    if (!latestTick || !oldestTick || typeof latestTick.price !== 'number') {
+      return {
+        currentPrice: 0,
+        priceChange: 0,
+        priceChangePercent: 0,
+        volume24h: 0,
+        tickCount: ticks.length,
+      };
+    }
+    
     const currentPrice = latestTick.price;
     const priceChange = currentPrice - oldestTick.price;
-    const priceChangePercent = (priceChange / oldestTick.price) * 100;
-    const volume24h = ticks.reduce((sum, tick) => sum + (tick.volume || 0), 0);
+    const priceChangePercent = oldestTick.price !== 0 
+      ? (priceChange / oldestTick.price) * 100 
+      : 0;
+    const volume24h = ticks.reduce((sum, tick) => sum + (tick?.quantity || tick?.volume || 0), 0);
 
     return {
       currentPrice,

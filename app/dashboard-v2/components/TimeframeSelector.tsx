@@ -22,14 +22,14 @@ export default function TimeframeSelector() {
   return (
     <div className="flex gap-4">
       <div className="flex flex-col gap-2">
-        <Label className="text-sm text-gray-400">Timeframe</Label>
+        <Label className="text-sm text-muted-foreground font-sans">Timeframe</Label>
         <Select value={timeframe} onValueChange={(value) => setTimeframe(value as Timeframe)}>
-          <SelectTrigger className="w-[150px] bg-gray-900 border-gray-700">
+          <SelectTrigger className="w-[150px] bg-card border-border font-sans">
             <SelectValue placeholder="Select timeframe" />
           </SelectTrigger>
-          <SelectContent className="bg-gray-900 border-gray-700">
+          <SelectContent className="bg-card border-border">
             {timeframes.map((tf) => (
-              <SelectItem key={tf.value} value={tf.value}>
+              <SelectItem key={tf.value} value={tf.value} className="font-sans">
                 {tf.label}
               </SelectItem>
             ))}
@@ -38,14 +38,14 @@ export default function TimeframeSelector() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label className="text-sm text-gray-400">Rolling Window</Label>
+        <Label className="text-sm text-muted-foreground font-sans">Rolling Window</Label>
         <Input
           type="number"
           value={rollingWindow}
           onChange={(e) => setRollingWindow(Number(e.target.value))}
           min={5}
           max={200}
-          className="w-[120px] bg-gray-900 border-gray-700"
+          className="w-[120px] bg-card border-border font-sans"
         />
       </div>
     </div>

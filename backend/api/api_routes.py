@@ -851,3 +851,374 @@ async def health_check(
             database="disconnected",
             active_symbols=0
         )
+
+
+# ============================================================================
+# WEBSOCKET SUBSCRIPTION ENDPOINTS
+# ============================================================================
+
+@router.post("/api/subscribe/{symbol}", tags=["Market Data"])
+async def subscribe_to_symbol(symbol: str):
+    """
+    Subscribe to real-time data for a specific symbol.
+    
+    Parameters:
+        - symbol: Trading symbol (e.g., BTCUSDT, ETHUSDT, ADAUSDT, SOLUSDT, DOTUSDT)
+    
+    Returns:
+        Subscription confirmation
+    """
+    try:
+        from ingestion.websocket_manager import websocket_manager
+        
+        symbol = symbol.upper()
+        await websocket_manager.subscribe_ticker(symbol)
+        
+        return {
+            "status": "success",
+            "message": f"Subscribed to {symbol}",
+            "symbol": symbol,
+            "subscribed_symbols": list(websocket_manager.get_subscribed_symbols())
+        }
+    except Exception as e:
+        logger.error(f"Error subscribing to {symbol}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to subscribe: {str(e)}")
+
+
+@router.post("/api/subscribe-all", tags=["Market Data"])
+async def subscribe_to_all_symbols():
+    """
+    Subscribe to real-time data for all available symbols.
+    
+    Returns:
+        Subscription confirmation with list of subscribed symbols
+    """
+    try:
+        from ingestion.websocket_manager import websocket_manager
+        
+        # List of symbols to subscribe to
+        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT"]
+        
+        subscribed = []
+        failed = []
+        
+        for symbol in symbols:
+            try:
+                await websocket_manager.subscribe_ticker(symbol)
+                subscribed.append(symbol)
+                logger.info(f"✅ Subscribed to {symbol}")
+            except Exception as e:
+                failed.append({"symbol": symbol, "error": str(e)})
+                logger.error(f"❌ Failed to subscribe to {symbol}: {e}")
+        
+        return {
+            "status": "success",
+            "message": f"Subscribed to {len(subscribed)}/{len(symbols)} symbols",
+            "subscribed": subscribed,
+            "failed": failed,
+            "total_subscribed": list(websocket_manager.get_subscribed_symbols())
+        }
+    except Exception as e:
+        logger.error(f"Error subscribing to all symbols: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to subscribe: {str(e)}")
+
+
+@router.get("/api/subscriptions", tags=["Market Data"])
+async def get_active_subscriptions():
+    """
+    Get list of currently subscribed symbols.
+    
+    Returns:
+        List of active symbol subscriptions
+    """
+    try:
+        from ingestion.websocket_manager import websocket_manager
+        
+        subscribed_symbols = list(websocket_manager.get_subscribed_symbols())
+        
+        return {
+            "status": "success",
+            "subscribed_symbols": subscribed_symbols,
+            "count": len(subscribed_symbols)
+        }
+    except Exception as e:
+        logger.error(f"Error getting subscriptions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get subscriptions: {str(e)}")
+
+
+# ============================================================================
+# CSV EXPORT ENDPOINT
+# ============================================================================
+
+@router.get("/api/export/{symbol}/{timeframe}", tags=["Data Export"])
+async def export_csv(
+    symbol: str,
+    timeframe: str,
+    limit: int = Query(1000, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Export OHLCV data as CSV file.
+    
+    Args:
+        symbol: Trading symbol (e.g., BTCUSDT)
+        timeframe: Timeframe (1m, 5m, 15m, 1h, 4h, 1d)
+        limit: Number of candles to export (max 10000)
+    
+    Returns:
+        CSV file with OHLCV data
+    """
+    try:
+        # Query OHLCV data
+        stmt = (
+            select(ResampledData)
+            .where(
+                and_(
+                    ResampledData.symbol == symbol,
+                    ResampledData.timeframe == timeframe
+                )
+            )
+            .order_by(desc(ResampledData.timestamp))
+            .limit(limit)
+        )
+        
+        result = await db.execute(stmt)
+        candles = result.scalars().all()
+        
+        if not candles:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No data found for {symbol} {timeframe}"
+            )
+        
+        # Convert to DataFrame
+        data = []
+        for candle in reversed(candles):  # Reverse to get chronological order
+            data.append({
+                "timestamp": candle.timestamp.isoformat(),
+                "symbol": candle.symbol,
+                "timeframe": candle.timeframe,
+                "open": candle.open,
+                "high": candle.high,
+                "low": candle.low,
+                "close": candle.close,
+                "volume": candle.volume,
+                "trade_count": candle.trade_count
+            })
+        
+        df = pd.DataFrame(data)
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        df.to_csv(output, index=False)
+        csv_content = output.getvalue()
+        
+        # Create filename
+        filename = f"{symbol}_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error exporting CSV: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+# ============================================================================
+# STATS TABLE ENDPOINT
+# ============================================================================
+
+@router.get("/api/stats/timeseries", tags=["Analytics"])
+async def get_timeseries_stats(
+    symbol: str = Query(..., description="Trading symbol"),
+    timeframe: str = Query("5m", description="Timeframe for aggregation"),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get time-series statistics table with aggregated metrics.
+    
+    Returns a table with:
+    - Timestamp
+    - Volume
+    - Trade Count
+    - Average Price
+    - Price Range (High - Low)
+    - Price Change %
+    
+    Args:
+        symbol: Trading symbol
+        timeframe: Timeframe for data (1m, 5m, 15m, 1h, 4h, 1d)
+        limit: Number of rows to return
+    """
+    try:
+        # Query OHLCV data
+        stmt = (
+            select(ResampledData)
+            .where(
+                and_(
+                    ResampledData.symbol == symbol,
+                    ResampledData.timeframe == timeframe
+                )
+            )
+            .order_by(desc(ResampledData.timestamp))
+            .limit(limit)
+        )
+        
+        result = await db.execute(stmt)
+        candles = result.scalars().all()
+        
+        if not candles:
+            return {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "count": 0,
+                "stats": []
+            }
+        
+        # Calculate stats for each candle
+        stats = []
+        prev_close = None
+        
+        for candle in reversed(candles):  # Chronological order
+            avg_price = (candle.high + candle.low + candle.close + candle.open) / 4
+            price_range = candle.high - candle.low
+            
+            # Calculate price change %
+            if prev_close is not None:
+                price_change_pct = ((candle.close - prev_close) / prev_close) * 100
+            else:
+                price_change_pct = 0.0
+            
+            stats.append({
+                "timestamp": candle.timestamp.isoformat(),
+                "open": round(candle.open, 2),
+                "high": round(candle.high, 2),
+                "low": round(candle.low, 2),
+                "close": round(candle.close, 2),
+                "volume": round(candle.volume, 4),
+                "trade_count": candle.trade_count,
+                "avg_price": round(avg_price, 2),
+                "price_range": round(price_range, 2),
+                "price_change_pct": round(price_change_pct, 2)
+            })
+            
+            prev_close = candle.close
+        
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "count": len(stats),
+            "stats": list(reversed(stats))  # Most recent first
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting timeseries stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+# ============================================================================
+# CROSS-CORRELATION HEATMAP ENDPOINT
+# ============================================================================
+
+@router.get("/api/correlation/matrix", tags=["Analytics"])
+async def get_correlation_matrix(
+    timeframe: str = Query("5m", description="Timeframe for correlation"),
+    lookback: int = Query(100, ge=5, le=500, description="Number of candles for correlation"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Calculate cross-correlation matrix between all trading symbols.
+    
+    Returns correlation coefficients between:
+    - BTCUSDT
+    - ETHUSDT  
+    - ADAUSDT
+    - SOLUSDT
+    - DOTUSDT
+    
+    Args:
+        timeframe: Timeframe for data (1m, 5m, 15m, 1h, 4h, 1d)
+        lookback: Number of candles to use for correlation calculation (min 5)
+    """
+    try:
+        symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT"]
+        
+        # Fetch price data for all symbols
+        price_data = {}
+        
+        for symbol in symbols:
+            stmt = (
+                select(ResampledData)
+                .where(
+                    and_(
+                        ResampledData.symbol == symbol,
+                        ResampledData.timeframe == timeframe
+                    )
+                )
+                .order_by(desc(ResampledData.timestamp))
+                .limit(lookback)
+            )
+            
+            result = await db.execute(stmt)
+            candles = result.scalars().all()
+            
+            if len(candles) < 5:  # Minimum data requirement (lowered from 20)
+                logger.warning(f"Insufficient data for {symbol}: {len(candles)} candles")
+                continue
+            
+            # Extract closing prices in chronological order
+            prices = [c.close for c in reversed(candles)]
+            price_data[symbol] = prices
+        
+        if len(price_data) < 2:
+            raise HTTPException(
+                status_code=404,
+                detail="Insufficient data for correlation calculation. Need at least 2 symbols with 5+ candles each."
+            )
+        
+        # Create DataFrame for correlation
+        df = pd.DataFrame(price_data)
+        
+        # Calculate actual data points used
+        actual_candles = min(len(prices) for prices in price_data.values())
+        data_quality = "excellent" if actual_candles >= 50 else "good" if actual_candles >= 20 else "limited"
+        
+        # Calculate correlation matrix
+        corr_matrix = df.corr()
+        
+        # Convert to nested dictionary format for frontend
+        correlation_data = []
+        for symbol1 in corr_matrix.index:
+            for symbol2 in corr_matrix.columns:
+                correlation_data.append({
+                    "symbol1": symbol1,
+                    "symbol2": symbol2,
+                    "correlation": round(corr_matrix.loc[symbol1, symbol2], 4)
+                })
+        
+        return {
+            "timeframe": timeframe,
+            "lookback": lookback,
+            "symbols": list(price_data.keys()),
+            "correlations": correlation_data,
+            "matrix": corr_matrix.to_dict(),
+            "metadata": {
+                "actual_candles": actual_candles,
+                "data_quality": data_quality,
+                "warning": "Limited data - correlation may be less reliable" if actual_candles < 20 else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating correlation matrix: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Correlation calculation failed: {str(e)}")

@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { useDashboard } from '../context/DashboardContext';
+import { useDashboard, Tick } from '../context/DashboardContext';
 import { Loader2 } from 'lucide-react';
 
 export default function PriceChart() {
@@ -14,16 +14,67 @@ export default function PriceChart() {
     // Reverse to show chronological order
     const sortedTicks = [...ticks].reverse();
 
-    // Apply rolling window filter
-    const windowedData = sortedTicks.slice(-rollingWindow);
+    // Always aggregate based on timeframe (whether using OHLCV or raw ticks)
+    const timeframeMs: Record<string, number> = {
+      '1s': 1000,
+      '1m': 60 * 1000,
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '1h': 60 * 60 * 1000,
+      '4h': 4 * 60 * 60 * 1000,
+      '1d': 24 * 60 * 60 * 1000,
+    };
 
-    return windowedData.map((tick) => ({
-      time: new Date(tick.timestamp).toLocaleTimeString(),
-      price: tick.price,
-      bid: tick.bid,
-      ask: tick.ask,
-    }));
-  }, [ticks, rollingWindow]);
+    const aggregatedTicks: Tick[] = [];
+    const interval = timeframeMs[timeframe] || 1000;
+    
+    // Group ticks into buckets by timeframe
+    const buckets = new Map<number, Tick[]>();
+
+    sortedTicks.forEach(tick => {
+      const timestamp = new Date(tick.timestamp).getTime();
+      const bucketKey = Math.floor(timestamp / interval) * interval;
+      
+      if (!buckets.has(bucketKey)) {
+        buckets.set(bucketKey, []);
+      }
+      buckets.get(bucketKey)!.push(tick);
+    });
+
+    // Create aggregated ticks (OHLC-style: use last price, average bid/ask)
+    Array.from(buckets.entries())
+      .sort(([a], [b]) => a - b)
+      .forEach(([bucketKey, ticksInBucket]) => {
+        if (ticksInBucket.length > 0) {
+          const lastTick = ticksInBucket[ticksInBucket.length - 1];
+          const avgBid = ticksInBucket
+            .filter(t => t.bid !== undefined)
+            .reduce((sum, t) => sum + (t.bid || 0), 0) / ticksInBucket.length || undefined;
+          const avgAsk = ticksInBucket
+            .filter(t => t.ask !== undefined)
+            .reduce((sum, t) => sum + (t.ask || 0), 0) / ticksInBucket.length || undefined;
+
+          aggregatedTicks.push({
+            ...lastTick,
+            timestamp: new Date(bucketKey).toISOString(),
+            bid: avgBid,
+            ask: avgAsk,
+          });
+        }
+      });
+
+    // Apply rolling window filter
+    const windowedData = aggregatedTicks.slice(-rollingWindow);
+
+    return windowedData
+      .filter((tick) => tick && typeof tick.price === 'number' && tick.timestamp)
+      .map((tick) => ({
+        time: new Date(tick.timestamp).toLocaleTimeString(),
+        price: tick.price,
+        bid: tick.bid,
+        ask: tick.ask,
+      }));
+  }, [ticks, rollingWindow, timeframe]);
 
   if (isLoading) {
     return (

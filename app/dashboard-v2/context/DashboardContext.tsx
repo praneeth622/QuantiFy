@@ -11,7 +11,7 @@ const api = axios.create({
   timeout: 30000,
 });
 
-export type Timeframe = '1s' | '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
+export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1d';
 
 export interface Symbol {
   symbol: string;
@@ -21,7 +21,8 @@ export interface Symbol {
 export interface Tick {
   symbol: string;
   price: number;
-  volume: number;
+  quantity?: number;  // API returns quantity, not volume
+  volume?: number;    // Keep for backwards compatibility
   timestamp: string;
   bid?: number;
   ask?: number;
@@ -82,26 +83,89 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
     refetchOnWindowFocus: false,
   });
 
-  // Fetch ticks for selected symbol
-  const { data: ticksData, isLoading: ticksLoading } = useQuery({
-    queryKey: ['ticks', selectedSymbol],
+    // Fetch ticks for selected symbol - use OHLCV data (resampled)
+  const { data: ticksData, isLoading: ticksLoading, error: ticksError } = useQuery({
+    queryKey: ['ticks', selectedSymbol, timeframe],
     queryFn: async () => {
-      const response = await api.get<Tick[]>('/api/ticks', {
-        params: { symbol: selectedSymbol, limit: 100 }
-      });
-      return response.data;
+      try {
+        // Use OHLCV (resampled) data for all timeframes
+        const response = await api.get('/api/ohlcv', {
+            params: { symbol: selectedSymbol, timeframe, limit: 100 }
+          });
+          
+          const data = response.data;
+          
+          // Convert OHLCV candles to Tick format
+          let ticksArray: Tick[] = [];
+          if (data && Array.isArray(data.candles) && data.candles.length > 0) {
+            ticksArray = data.candles.map((candle: any) => ({
+              symbol: candle.symbol,
+              price: candle.close, // Use close price
+              quantity: candle.volume,
+              volume: candle.volume,
+              timestamp: candle.timestamp,
+              bid: candle.low,  // Use low as bid approximation
+              ask: candle.high, // Use high as ask approximation
+            }));
+            
+            console.log(`[DashboardContext] Fetched ${ticksArray.length} OHLCV candles for ${selectedSymbol} (${timeframe})`);
+            return ticksArray;
+          } else {
+            // No candles available, use raw ticks as fallback
+            console.log(`[DashboardContext] No OHLCV candles for ${selectedSymbol} at ${timeframe}, using raw ticks`);
+            
+            const rawResponse = await api.get('/api/ticks', {
+              params: { symbol: selectedSymbol, limit: 100 }
+            });
+            
+            const rawData = rawResponse.data;
+            let rawTicks: Tick[] = [];
+            
+            if (Array.isArray(rawData)) {
+              rawTicks = rawData;
+            } else if (rawData && Array.isArray(rawData.ticks)) {
+              rawTicks = rawData.ticks;
+            }
+            
+            const validTicks = rawTicks.filter(
+              (tick) => tick && typeof tick.price === 'number' && tick.timestamp
+            );
+            
+            console.log(`[DashboardContext] Using ${validTicks.length} raw ticks for ${selectedSymbol}`);
+            return validTicks;
+          }
+        
+      } catch (error: any) {
+        // Handle 404 - no data for symbol (not an error, just no data yet)
+        if (error.response?.status === 404) {
+          console.log(`[DashboardContext] No data available for ${selectedSymbol}`);
+          return [];
+        }
+        // Log other errors
+        console.error('[DashboardContext] Data fetch error:', error);
+        return [];
+      }
     },
     enabled: !!selectedSymbol,
     refetchInterval: 2000, // Refetch every 2 seconds
     staleTime: 1000,
+    retry: false, // Don't retry 404s
+    retryOnMount: false,
   });
+
+  // Log errors for debugging
+  useEffect(() => {
+    if (ticksError) {
+      console.error('[DashboardContext] Ticks query error:', ticksError);
+    }
+  }, [ticksError]);
 
   // Fetch alerts
   const { data: alertsData, isLoading: alertsLoading } = useQuery({
     queryKey: ['alerts'],
     queryFn: async () => {
       const response = await api.get<{ count: number; alerts: Alert[] }>('/api/alerts');
-      return response.data.alerts;
+      return response.data.alerts || [];
     },
     refetchInterval: 5000, // Refetch every 5 seconds
     staleTime: 2000,
