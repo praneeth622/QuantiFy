@@ -105,16 +105,25 @@ function aggregateTicksToCandles(
  * Hook to get aggregated tick data with caching
  */
 export function useAggregatedTicks({ ticks, symbol, timeframe }: UseAggregatedTicksOptions) {
+  // Create a hash of the most recent tick data to detect actual changes
+  // This ensures React Query re-aggregates when new WebSocket data arrives
+  const latestTickHash = useMemo(() => {
+    if (ticks.length === 0) return 'empty';
+    // Use the last tick's timestamp + price as a fingerprint
+    const lastTick = ticks[ticks.length - 1];
+    return `${lastTick?.timestamp}-${lastTick?.price}-${ticks.length}`;
+  }, [ticks]);
+
   // Use React Query to cache aggregated data
   const { data: aggregatedData, isLoading } = useQuery({
-    queryKey: ['aggregatedTicks', symbol, timeframe, ticks.length],
+    queryKey: ['aggregatedTicks', symbol, timeframe, latestTickHash],
     queryFn: () => {
       const candles = aggregateTicksToCandles(ticks, symbol, timeframe);
       console.log(`[useAggregatedTicks] Aggregated ${ticks.length} ticks into ${candles.length} candles for timeframe: ${timeframe}`);
       return candles;
     },
     enabled: ticks.length > 0 && !!symbol,
-    staleTime: 2000, // Consider data stale after 2 seconds
+    staleTime: 1000, // Consider data stale after 1 second (reduced for real-time updates)
     gcTime: 30000, // Keep in cache for 30 seconds
   });
 

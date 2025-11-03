@@ -99,9 +99,9 @@ class BinanceWebSocketClient:
     - Comprehensive error handling and logging
     """
     
-    # Binance WebSocket endpoints
-    BASE_WS_URL = "wss://stream.binance.com:9443/ws"
-    COMBINED_STREAM_URL = "wss://stream.binance.com:9443/stream"
+    # Binance WebSocket endpoints (Updated to use Futures API)
+    BASE_WS_URL = "wss://fstream.binance.com/ws"
+    COMBINED_STREAM_URL = "wss://fstream.binance.com/stream"
     
     def __init__(
         self,
@@ -207,7 +207,7 @@ class BinanceWebSocketClient:
     
     async def disconnect(self) -> None:
         """Gracefully close WebSocket connection"""
-        if self.websocket and not self.websocket.closed:
+        if self.websocket and not getattr(self.websocket, 'closed', True):
             logger.info("Closing WebSocket connection...")
             await self.websocket.close()
             self.state = ConnectionState.CLOSED

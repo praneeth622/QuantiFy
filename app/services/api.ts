@@ -8,6 +8,7 @@ import { toast } from 'sonner'; // Using sonner for toast notifications
 import type {
   Symbol,
   Tick,
+  TicksResponse,
   OHLCV,
   SpreadAnalytics,
   CorrelationData,
@@ -152,7 +153,7 @@ const handleAPIError = (error: AxiosError<ErrorResponse>): void => {
  */
 export const getSymbols = async (): Promise<Symbol[]> => {
   try {
-    const response = await apiClient.get<Symbol[]>('/api/market/symbols');
+    const response = await apiClient.get<Symbol[]>('/api/symbols');
     return response.data;
   } catch (error) {
     throw error;
@@ -164,9 +165,11 @@ export const getSymbols = async (): Promise<Symbol[]> => {
  */
 export const getTicks = async (params?: TickQueryParams): Promise<Tick[]> => {
   try {
-    const response = await apiClient.get<Tick[]>('/api/market/ticks', { params });
-    toast.success(`Retrieved ${response.data.length} ticks`, { duration: 2000 });
-    return response.data;
+    const response = await apiClient.get<TicksResponse>('/api/ticks', { params });
+    // Extract the ticks array from the response object
+    const ticks = response.data.ticks || [];
+    toast.success(`Retrieved ${ticks.length} ticks`, { duration: 2000 });
+    return ticks;
   } catch (error) {
     throw error;
   }
@@ -177,7 +180,7 @@ export const getTicks = async (params?: TickQueryParams): Promise<Tick[]> => {
  */
 export const getOHLCV = async (params: OHLCVQueryParams): Promise<OHLCV[]> => {
   try {
-    const response = await apiClient.get<OHLCV[]>('/api/market/ohlcv', { params });
+    const response = await apiClient.get<OHLCV[]>('/api/ohlcv', { params });
     toast.success(`Retrieved ${response.data.length} candles`, { duration: 2000 });
     return response.data;
   } catch (error) {

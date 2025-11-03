@@ -63,6 +63,8 @@ class AnalyticsResults(Base):
     symbol_pair = Column(String(50), nullable=False, index=True)  # e.g., "BTCUSDT-ETHUSDT"
     hedge_ratio = Column(Numeric(10, 6))  # OLS regression coefficient
     spread = Column(Numeric(20, 8))  # Price spread (symbol1 - hedge_ratio * symbol2)
+    spread_mean = Column(Numeric(20, 8))  # Mean of spread over window
+    spread_std = Column(Numeric(20, 8))  # Standard deviation of spread
     z_score = Column(Numeric(10, 4))  # Z-score of the spread
     correlation = Column(Numeric(6, 4))  # Pearson correlation coefficient
     timestamp = Column(DateTime, nullable=False, index=True)
