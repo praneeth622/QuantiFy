@@ -184,10 +184,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await websocket_manager.start()
         logger.info("✅ WebSocket manager started - Connected to Binance")
         
-        # 3. Initialize resampler service
+        # 3. Initialize resampler service with all timeframes and symbols
         logger.info("🔄 [3/7] Initializing resampler service...")
-        resampler_service = ResamplerService()
-        logger.info("✅ Resampler service initialized")
+        resampler_service = ResamplerService(
+            symbols=['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'DOTUSDT'],
+            timeframes=['1m', '5m', '15m', '1h', '4h', '1d'],
+            lookback_minutes=120,  # Look back 2 hours for unprocessed data
+            run_interval=10.0  # Run every 10 seconds
+        )
+        logger.info("✅ Resampler service initialized (6 timeframes, 5 symbols)")
         
         # 4. Initialize analytics engine
         logger.info("📊 [4/7] Initializing analytics engine...")

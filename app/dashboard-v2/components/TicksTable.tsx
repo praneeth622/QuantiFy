@@ -40,7 +40,14 @@ export default function TicksTable() {
         </TableHeader>
         <TableBody>
           {ticks.slice(0, 50).map((tick, index) => {
-            const prevPrice = index < ticks.length - 1 ? ticks[index + 1].price : tick.price;
+            // Skip invalid ticks
+            if (!tick || typeof tick.price !== 'number' || !tick.timestamp) {
+              return null;
+            }
+            
+            const prevPrice = index < ticks.length - 1 && ticks[index + 1]?.price 
+              ? ticks[index + 1].price 
+              : tick.price;
             const isUp = tick.price > prevPrice;
             const isDown = tick.price < prevPrice;
 
@@ -49,11 +56,13 @@ export default function TicksTable() {
                 <TableCell className="text-gray-300">
                   {new Date(tick.timestamp).toLocaleTimeString()}
                 </TableCell>
-                <TableCell className="font-medium text-white">{tick.symbol}</TableCell>
+                <TableCell className="font-medium text-white">{tick.symbol || 'N/A'}</TableCell>
                 <TableCell className={`font-mono ${isUp ? 'text-green-400' : isDown ? 'text-red-400' : 'text-gray-300'}`}>
                   ${tick.price.toFixed(2)}
                 </TableCell>
-                <TableCell className="text-gray-300">{tick.volume?.toFixed(4) || 'N/A'}</TableCell>
+                <TableCell className="text-gray-300">
+                  {(tick.quantity || tick.volume)?.toFixed(6) || 'N/A'}
+                </TableCell>
                 <TableCell className="text-green-400">{tick.bid?.toFixed(2) || 'N/A'}</TableCell>
                 <TableCell className="text-red-400">{tick.ask?.toFixed(2) || 'N/A'}</TableCell>
                 <TableCell>

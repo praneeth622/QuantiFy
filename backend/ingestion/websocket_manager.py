@@ -40,12 +40,12 @@ class WebSocketManager:
             self.socket_manager = BinanceSocketManager(self.client)
             self.is_running = True
             
-            # Start with default symbols
-            default_symbols = ["BTCUSDT", "ETHUSDT"]
+            # Start with all required symbols
+            default_symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT", "SOLUSDT", "DOTUSDT"]
             for symbol in default_symbols:
                 await self.subscribe_ticker(symbol)
             
-            logger.info("WebSocket manager started successfully")
+            logger.info(f"WebSocket manager started successfully with {len(default_symbols)} symbols")
             
         except Exception as e:
             logger.error(f"Failed to start WebSocket manager: {e}")
