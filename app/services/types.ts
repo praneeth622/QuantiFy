@@ -22,6 +22,15 @@ export interface Tick {
   created_at: string;
 }
 
+// API Response wrapper for ticks
+export interface TicksResponse {
+  symbol: string;
+  count: number;
+  ticks: Tick[];
+  start_time: string | null;
+  end_time: string | null;
+}
+
 export interface OHLCV {
   id: number;
   timestamp: string;

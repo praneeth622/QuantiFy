@@ -198,7 +198,7 @@ async def get_symbols(
         List of symbols with exchange information
     """
     try:
-        # Query distinct symbols from market metadata
+        # Query distinct symbols from market metadata first
         result = await db.execute(
             select(MarketMetadata.symbol, MarketMetadata.exchange)
             .distinct()
@@ -206,16 +206,17 @@ async def get_symbols(
         symbols = result.all()
         
         if not symbols:
-            # If no metadata, check raw ticks
+            # If no metadata, check raw ticks (without exchange field)
             result = await db.execute(
-                select(RawTicks.symbol, RawTicks.exchange)
+                select(RawTicks.symbol)
                 .distinct()
                 .limit(100)
             )
-            symbols = result.all()
+            raw_symbols = result.all()
+            symbols = [(symbol[0], "binance") for symbol in raw_symbols]  # Default to binance
         
         return [
-            SymbolInfo(symbol=symbol, exchange=exchange)
+            SymbolInfo(symbol=symbol, exchange=exchange or "binance")
             for symbol, exchange in symbols
         ]
     except Exception as e:
@@ -226,7 +227,7 @@ async def get_symbols(
 @router.get("/api/ticks", response_model=TicksResponse, tags=["Market Data"])
 async def get_recent_ticks(
     symbol: str = Query(..., description="Trading symbol (e.g., BTCUSDT)"),
-    limit: int = Query(100, ge=1, le=10000, description="Number of ticks to return"),
+    limit: int = Query(1000, ge=1, le=50000, description="Number of ticks to return"),  # Increased default to 1000, max to 50000
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -234,7 +235,7 @@ async def get_recent_ticks(
     
     Parameters:
         - symbol: Trading symbol (e.g., BTCUSDT)
-        - limit: Number of recent ticks to return (max 10000)
+        - limit: Number of recent ticks to return (default: 1000, max: 50000)
     
     Returns:
         Recent tick data with metadata
@@ -277,8 +278,8 @@ async def get_recent_ticks(
 @router.get("/api/ohlcv", response_model=OHLCVListResponse, tags=["Market Data"])
 async def get_ohlcv_data(
     symbol: str = Query(..., description="Trading symbol (e.g., BTCUSDT)"),
-    timeframe: str = Query("1m", description="Timeframe (1m, 5m, 15m, 1h, etc.)"),
-    limit: int = Query(50, ge=1, le=1000, description="Number of candles to return"),
+    timeframe: str = Query("1m", description="Timeframe (1s, 1m, 5m, 15m, 1h, 4h, 1d)"),  # Added 1s
+    limit: int = Query(500, ge=1, le=10000, description="Number of candles to return"),  # Increased default to 500, max to 10000
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -286,8 +287,8 @@ async def get_ohlcv_data(
     
     Parameters:
         - symbol: Trading symbol (e.g., BTCUSDT)
-        - timeframe: Timeframe interval (1m, 5m, 15m, 1h, 4h, 1d)
-        - limit: Number of candles to return (max 1000)
+        - timeframe: Timeframe interval (1s, 1m, 5m, 15m, 1h, 4h, 1d)
+        - limit: Number of candles to return (default: 500, max: 10000)
     
     Returns:
         OHLCV candlestick data with metadata
@@ -869,7 +870,7 @@ async def subscribe_to_symbol(symbol: str):
         Subscription confirmation
     """
     try:
-        from ingestion.websocket_manager import websocket_manager
+        from ingestion.direct_websocket_manager import websocket_manager
         
         symbol = symbol.upper()
         await websocket_manager.subscribe_ticker(symbol)
@@ -932,7 +933,7 @@ async def get_active_subscriptions():
         List of active symbol subscriptions
     """
     try:
-        from ingestion.websocket_manager import websocket_manager
+        from ingestion.direct_websocket_manager import websocket_manager
         
         subscribed_symbols = list(websocket_manager.get_subscribed_symbols())
         
