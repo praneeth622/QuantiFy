@@ -21,6 +21,7 @@ Watch a quick walkthrough / demo of QuantiFy on Loom:
 
 You can use this link during presentations or to share the application tour with stakeholders.
 
+---
 
 ## 📋 Overview
 
@@ -33,6 +34,16 @@ QuantiFy delivers real-time market data ingestion, advanced quantitative analyti
 - Smart alert system with configurable thresholds and cooldown periods
 - Interactive dashboards with live charting and analytics visualization
 
+QuantiFy delivers real-time market data ingestion, advanced quantitative analytics, and intelligent alerting for professional trading operations. Built with modern async architecture, the platform streams live data from Binance, performs statistical analysis on-the-fly, and provides actionable insights through an intuitive web interface.
+
+**Key Capabilities:**
+- Real-time tick data ingestion and storage from Binance WebSocket API
+- Statistical arbitrage analytics (cointegration, correlation, z-scores)
+- Automated OHLCV resampling across multiple timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+- Smart alert system with configurable thresholds and cooldown periods
+- Interactive dashboards with live charting and analytics visualization
+
+>>>>>>> origin/main
 ---
 
 ## ✨ Features
@@ -136,6 +147,7 @@ graph TB
 
 ## 🚀 Quick Start
 
+<<<<<<< HEAD
 ### Option 1: Docker (Recommended)
 
 The easiest way to run QuantiFy is using Docker. This method handles all dependencies and services automatically.
@@ -219,12 +231,19 @@ The Docker setup includes:
 If you prefer to run services manually without Docker:
 
 #### Prerequisites
+=======
+### Prerequisites
+>>>>>>> origin/main
 
 - **Python 3.11+** (with pip)
 - **Node.js 18+** (with npm/pnpm)
 - **Git** (for cloning the repository)
 
+<<<<<<< HEAD
 #### Backend Setup
+=======
+### Backend Setup
+>>>>>>> origin/main
 
 ```bash
 # Navigate to backend directory
@@ -400,6 +419,7 @@ curl "http://localhost:8000/api/export/csv?symbol=BTCUSDT&data_type=ticks&start_
 
 ---
 
+<<<<<<< HEAD
 ## 🐳 Docker Deployment
 
 ### Docker Files Overview
@@ -626,6 +646,8 @@ docker system prune -a
 
 ---
 
+=======
+>>>>>>> origin/main
 ## 🎯 Design Decisions
 
 ### Why FastAPI?
@@ -934,7 +956,11 @@ Once you have the exported PNG/SVG, paste it into the repo root (or tell me the 
 
 ---
 
+<<<<<<< HEAD
 ## ✅ Architecture & Design — Evaluation mapping 
+=======
+## ✅ Architecture & Design — Evaluation mapping (40%)
+>>>>>>> origin/main
 
 Below is a short mapping of how this repo satisfies the Architecture & Design scoring criteria for your assignment.
 
