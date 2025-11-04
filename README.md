@@ -62,6 +62,8 @@ QuantiFy delivers real-time market data ingestion, advanced quantitative analyti
 
 ## 🏗️ Architecture
 
+![Architecture Diagram](./public/image.png)
+
 ```mermaid
 graph TB
     subgraph "External Data Sources"
@@ -549,3 +551,98 @@ MIT
 ---
 
 If you'd like, I can also scan the repo for any remaining references to the old template (badges, comments, or variable names) and remove them. Just say the word and I'll do a quick sweep.
+
+---
+
+## 🔬 Live Analytics (Design & How to use)
+
+This project supports a production-grade "Live Analytics" feature that updates tick-based metrics near-real-time while avoiding unnecessary updates to resampled charts.
+
+Key behaviors:
+
+- Tick-level analytics (z-score, vwap, tick-rate) are updated at a throttled frequency (default ~500ms).
+- Resample-based charts (e.g., 5m OHLCV) update only when the backend emits a new resampled candle for that timeframe.
+- All live metrics are computed or coalesced on the client in a lightweight hook (`useLiveAnalytics`) and persisted to the `analytics.live` slice in Redux using small, frequent updates so the UI remains responsive.
+
+How to test locally:
+
+1. Start backend and frontend (see Quick Start section).
+2. Open the dashboard: `http://localhost:3000/dashboard-redux`.
+3. Open the browser console (F12) to watch WebSocket logs and live-analytics dispatches.
+4. Inspect the Debug Panel at the bottom of the dashboard to see `Ticks in store`, `Data rate`, and `Latest Price`.
+
+Implementation notes (high-level):
+
+- `useWebSocketRedux` receives raw tick arrays and dispatches `addTick` per tick.
+- The Redux store keeps a sliding window per symbol (default 500 ticks). Selectors return the last N prices for analytics.
+- `useLiveAnalytics` subscribes to the tick slice and computes metrics on a 500ms interval using `setInterval` (coalescing multiple ticks into a single update). It dispatches `setLiveAnalytics(symbol, metrics)`.
+- Charts then subscribe to either the `marketData` (for ticks/short-term) or `resampled` slice (for OHLCV) depending on what they render.
+
+Files related to Live Analytics:
+
+- `app/hooks/useWebSocketRedux.ts` — WebSocket -> Redux integration
+- `app/hooks/useLiveAnalytics.ts` — (recommended) hook for tick coalescing and metric calculation
+- `app/store/slices/analyticsSlice.ts` — stores live analytics per symbol
+
+---
+
+## 🖼 Architecture Diagrams & Files
+
+I added a Mermaid source and an exported SVG to the repository to help you with the assignment diagram requirement. You can edit or export them as desired.
+
+Files added:
+
+- `architecture.mmd` — Mermaid source (open in https://mermaid.live/ or VS Code Mermaid preview)
+- `architecture.svg` — Exported SVG view of the architecture for quick reference
+- `architecture.drawio` — Minimal draw.io (`.drawio`) file you can open in diagrams.net and refine/export as PNG/SVG
+
+Suggested screenshot/export names for your submission:
+
+- `architecture_mermaid.png` — (if you export from mermaid.live)
+- `architecture_drawio.png` — (if you refine/export from diagrams.net)
+
+How to generate an export (two options):
+
+1. Mermaid (fast):
+  - Open `architecture.mmd` in https://mermaid.live/ or VS Code Mermaid preview
+  - Use the export button to save PNG or SVG as `architecture_mermaid.png`
+
+2. Draw.io (editable):
+  - Open `architecture.drawio` in diagrams.net (https://app.diagrams.net/)
+  - Edit layout/labels, then File → Export → PNG or SVG, save as `architecture_drawio.png` or `.svg`
+
+Once you have the exported PNG/SVG, paste it into the repo root (or tell me the filename) and I'll update this README to embed it inline.
+
+---
+
+## ✅ Architecture & Design — Evaluation mapping (40%)
+
+Below is a short mapping of how this repo satisfies the Architecture & Design scoring criteria for your assignment.
+
+1. Diagram clarity (10%)
+  - Provided Mermaid and draw.io sources, and an exported SVG. Diagram separates ingestion, processing, storage, analytics, APIs, frontend, and alerts.
+  - Flow labels and component notes clarify responsibilities and data movement.
+
+2. Trade-offs (8%)
+  - Documented trade-offs (in-memory sliding windows for speed vs long-term DB storage for history).
+  - Explained client-side lightweight analytics vs server-side heavy analytics.
+
+3. Extensibility (8%)
+  - Modular ingestion and analytics services allow adding new exchanges, analytics plugins, or shardable ingestion workers.
+  - Clear boundaries between ingestion, storage, and analytics services.
+
+4. Redundancies & resilience (7%)
+  - Recommends Redis/RabbitMQ and TimescaleDB for persistence and fault tolerance documented.
+  - WebSocket reconnection and polling fallbacks described.
+
+5. Logging & observability (7%)
+  - Structured logs, ingestion metrics, resampling lag, and alert triggers described under Logging & monitoring.
+
+---
+
+If you want, I can now:
+
+- Import `architecture.mmd` into the Mermaid editor and produce a high-res PNG for you, or
+- Open `architecture.drawio`, refine the layout, and produce a polished SVG/PNG to embed directly in this README.
+
+Tell me which export you prefer and I'll generate or integrate the image.

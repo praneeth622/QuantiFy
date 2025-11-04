@@ -1,0 +1,49 @@
+%% Architecture mermaid diagram for QuantiFy
+flowchart LR
+  subgraph External[External Data]
+    BINANCE["Binance WebSocket API"]
+  end
+
+  subgraph Backend[Backend (FastAPI)]
+    WS_MGR["WebSocket Manager / Ingestion"]
+    INGESTION["Ingestion Validator & Queue"]
+    DB[("DB: SQLite / Postgres / TimescaleDB")]
+    RESAMPLER["Resampler (1s,1m,5m,...)"]
+    ANALYTICS["Analytics Engine (zscore, corr, hedge)"]
+    ALERTS["Alert Manager"]
+    API["REST API / /docs"]
+    WSS["WebSocket Broadcaster (clients)"]
+  end
+
+  subgraph Frontend[Frontend (Next.js + Redux)]
+    UI["React Dashboard"]
+    WS_CLIENT["WebSocket Client (useWebSocketRedux)"]
+    STORE["Redux Store (marketData, analytics, ui)"]
+    CHARTS["Charts (Recharts)"]
+    LIVE_ANALYTICS["Live Analytics Hook (500ms throttled)"]
+  end
+
+  BINANCE -->|live ticks| WS_MGR
+  WS_MGR --> INGESTION
+  INGESTION -->|store raw ticks| DB
+  DB -->|historical queries| API
+  DB --> RESAMPLER
+  RESAMPLER -->|candles| DB
+  RESAMPLER --> ANALYTICS
+  ANALYTICS -->|metrics| DB
+  ANALYTICS --> ALERTS
+  ALERTS --> WSS
+  WSS --> WS_CLIENT
+  API --> UI
+  WS_CLIENT -->|tick messages| STORE
+  STORE --> CHARTS
+  STORE --> LIVE_ANALYTICS
+  LIVE_ANALYTICS --> STORE
+
+  classDef infra fill:#f8f9fa,stroke:#333,stroke-width:1px;
+  class Backend,External,Frontend infra;
+
+  %% Notes
+  click WS_MGR "#" "Websocket manager handles reconnections, batching, dedup"
+  click RESAMPLER "#" "Resamples tick->OHLCV on backend with pandas or db continuous aggregates"
+  click LIVE_ANALYTICS "#" "Client-side live analytics: zscore, vwap, rates (500ms update)"
