@@ -51,6 +51,13 @@ export function useWebSocketRedux({
       const message = JSON.parse(event.data);
       const timestamp = Date.now();
       
+      console.log('📨 WebSocket message received:', {
+        type: message.type,
+        dataType: Array.isArray(message.data) ? 'array' : typeof message.data,
+        dataLength: Array.isArray(message.data) ? message.data.length : 1,
+        sample: Array.isArray(message.data) ? message.data[0] : message.data
+      });
+      
       // Add to message queue
       dispatch(addMessage({
         type: message.type || 'unknown',
@@ -61,14 +68,31 @@ export function useWebSocketRedux({
       // Route message based on type
       switch (message.type) {
         case 'tick':
-          dispatch(addTick({
-            id: message.data.id || Date.now(),
-            timestamp: message.data.timestamp || new Date().toISOString(),
-            symbol: message.data.symbol,
-            price: parseFloat(message.data.price),
-            quantity: parseFloat(message.data.quantity || message.data.size || 0),
-            created_at: new Date().toISOString(),
-          }));
+          // Backend sends array of ticks in message.data
+          const tickData = Array.isArray(message.data) ? message.data : [message.data];
+          
+          console.log(`✅ Processing ${tickData.length} ticks`);
+          
+          tickData.forEach((tick: any) => {
+            // Validate tick has required fields
+            if (!tick.symbol || !tick.price) {
+              console.warn('Invalid tick data:', tick);
+              return;
+            }
+            
+            const processedTick = {
+              id: tick.id || Date.now(),
+              timestamp: tick.timestamp || new Date().toISOString(),
+              symbol: tick.symbol,
+              price: parseFloat(tick.price),
+              quantity: parseFloat(tick.quantity || tick.size || 0),
+              created_at: new Date().toISOString(),
+            };
+            
+            console.log('💾 Adding tick to Redux:', processedTick);
+            
+            dispatch(addTick(processedTick));
+          });
           break;
           
         case 'ohlcv':
@@ -163,9 +187,18 @@ export function useWebSocketRedux({
   }, [dispatch, autoReconnect, reconnectDelay, maxReconnectAttempts, stats.reconnectAttempts, connected]);
   
   const handleError = useCallback((event: Event) => {
-    console.error('WebSocket error:', event);
-    dispatch(setConnectionError('Connection failed'));
-    dispatch(setConnectionStatus({ connected: false, error: 'Connection failed' }));
+    // Log a useful message instead of an empty object
+    const anyEvent = event as any;
+    const message = anyEvent?.message || anyEvent?.reason || anyEvent?.type || 'Connection failed';
+    const code = anyEvent?.code;
+    
+    // Only log if not already logged
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.CLOSED) {
+      console.warn('WebSocket error:', { message, type: anyEvent?.type, code });
+    }
+    
+    dispatch(setConnectionError(message));
+    dispatch(setConnectionStatus({ connected: false, error: message }));
   }, [dispatch]);
   
   // Connect function
