@@ -1,0 +1,69 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+
+# Next.js
+.next/
+out/
+build
+dist
+
+# Production
+.vercel
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+*.log
+logs
+
+# Local env files
+.env*.local
+.env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+quantify.db
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/
+
+# Test files
+test_*.py
+test_*.sh
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+

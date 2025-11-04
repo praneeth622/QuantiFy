@@ -10,6 +10,7 @@ from statsmodels.regression.linear_model import OLS
 from statsmodels.tsa.stattools import adfuller
 from sklearn.preprocessing import StandardScaler
 import logging
+from sqlalchemy import select, and_
 
 from database.connection import database_manager
 from database.models import RawTicks, ResampledData, AnalyticsResults
@@ -265,36 +266,45 @@ class AnalyticsEngine:
             
             # Query database
             async for session in database_manager.get_session():
-                # Try to get candle data first
-                query = session.query(CandleData).filter(
-                    CandleData.symbol == symbol,
-                    CandleData.timestamp >= start_time,
-                    CandleData.timestamp <= end_time,
-                    CandleData.interval == f"{window_minutes}m"
-                ).order_by(CandleData.timestamp)
+                # Try to get resampled data first (60 minutes for analytics window)
+                query = select(ResampledData).where(
+                    and_(
+                        ResampledData.symbol == symbol,
+                        ResampledData.timeframe == f"{window_minutes}m",
+                        ResampledData.timestamp >= start_time,
+                        ResampledData.timestamp <= end_time
+                    )
+                ).order_by(ResampledData.timestamp)
                 
-                result = await query.all()
+                result = await session.execute(query)
+                candles = result.scalars().all()
                 
-                if result:
-                    return [candle.close_price for candle in result]
+                if candles and len(candles) >= 20:
+                    logger.debug(f"Got {len(candles)} resampled candles for {symbol}")
+                    return [candle.close for candle in candles]
                 
                 # Fallback to tick data
-                tick_query = session.query(TickData).filter(
-                    TickData.symbol == symbol,
-                    TickData.timestamp >= start_time,
-                    TickData.timestamp <= end_time
-                ).order_by(TickData.timestamp)
+                tick_query = select(RawTicks).where(
+                    and_(
+                        RawTicks.symbol == symbol,
+                        RawTicks.timestamp >= start_time,
+                        RawTicks.timestamp <= end_time
+                    )
+                ).order_by(RawTicks.timestamp)
                 
-                tick_result = await tick_query.all()
+                tick_result = await session.execute(tick_query)
+                ticks = tick_result.scalars().all()
                 
-                if tick_result:
+                if ticks and len(ticks) > 0:
+                    logger.debug(f"Got {len(ticks)} ticks for {symbol}, sampling...")
                     # Sample tick data to approximate candles
-                    prices = [tick.price for tick in tick_result]
+                    prices = [tick.price for tick in ticks]
                     # Simple sampling - take every nth tick
                     sample_size = min(lookback_periods, len(prices))
                     step = max(1, len(prices) // sample_size)
                     return prices[::step]
                 
+                logger.warning(f"No data found for {symbol} between {start_time} and {end_time}")
                 return []
                 
         except Exception as e:
@@ -308,23 +318,113 @@ class AnalyticsEngine:
         metric_value: float, 
         window_size: int
     ):
-        """Store analytics result in database"""
+        """Store analytics result in database (DEPRECATED - use compute_pair_analytics)"""
+        logger.warning(f"_store_analytics_result is deprecated, use compute_pair_analytics instead")
+    
+    async def compute_pair_analytics(
+        self,
+        symbol1: str,
+        symbol2: str,
+        window_minutes: int = 60,
+        lookback_periods: int = 100
+    ) -> Optional[Dict]:
+        """
+        Compute complete analytics for a symbol pair and store in database
+        Returns: Dictionary with all analytics metrics or None if computation fails
+        """
         try:
+            logger.info(f"Computing analytics for {symbol1}/{symbol2}")
+            
+            # Get price data for both symbols
+            prices1 = await self._get_price_series(symbol1, window_minutes, lookback_periods)
+            prices2 = await self._get_price_series(symbol2, window_minutes, lookback_periods)
+            
+            if len(prices1) < 20 or len(prices2) < 20:
+                logger.warning(f"Insufficient data: {symbol1}={len(prices1)}, {symbol2}={len(prices2)}")
+                return None
+            
+            # Align data by taking minimum length and converting to floats
+            min_length = min(len(prices1), len(prices2))
+            prices1_aligned = [float(p) for p in prices1[:min_length]]
+            prices2_aligned = [float(p) for p in prices2[:min_length]]
+            
+            # Create DataFrame
+            df = pd.DataFrame({
+                'price1': prices1_aligned,
+                'price2': prices2_aligned
+            }).dropna()
+            
+            if len(df) < 20:
+                logger.warning(f"Insufficient aligned data: {len(df)} rows")
+                return None
+            
+            # 1. Calculate correlation
+            correlation = df['price1'].corr(df['price2'])
+            
+            # 2. Calculate hedge ratio using OLS
+            model = OLS(df['price1'], df['price2']).fit()
+            hedge_ratio = float(model.params[0])
+            
+            # 3. Calculate spread
+            spread_series = df['price1'] - hedge_ratio * df['price2']
+            current_spread = float(spread_series.iloc[-1])
+            spread_mean = float(spread_series.mean())
+            spread_std = float(spread_series.std())
+            
+            # 4. Calculate Z-score
+            if spread_std > 0:
+                z_score = (current_spread - spread_mean) / spread_std
+            else:
+                z_score = 0.0
+            
+            # 5. Calculate volatilities
+            returns1 = df['price1'].pct_change().dropna()
+            returns2 = df['price2'].pct_change().dropna()
+            volatility_1 = float(returns1.std()) if len(returns1) > 0 else None
+            volatility_2 = float(returns2.std()) if len(returns2) > 0 else None
+            
+            # 6. Store in database
             async for session in database_manager.get_session():
-                result = AnalyticsResult(
-                    symbol_pair=symbol_pair,
-                    metric_name=metric_name,
-                    metric_value=metric_value,
-                    window_size=window_size,
-                    timestamp=datetime.utcnow()
+                result = AnalyticsResults(
+                    symbol_pair=f"{symbol1}-{symbol2}",
+                    hedge_ratio=hedge_ratio,
+                    spread=current_spread,
+                    spread_mean=spread_mean,
+                    spread_std=spread_std,
+                    z_score=z_score,
+                    correlation=correlation,
+                    timestamp=datetime.utcnow(),
+                    window_size=window_minutes * 60,
+                    volatility_1=volatility_1,
+                    volatility_2=volatility_2,
+                    cointegration_pvalue=None,  # Can be added later
+                    half_life=None  # Can be added later
                 )
                 
                 session.add(result)
                 await session.commit()
-                break
+                
+                logger.info(
+                    f"✅ Stored analytics: {symbol1}/{symbol2} - "
+                    f"Corr={correlation:.4f}, Hedge={hedge_ratio:.4f}, "
+                    f"Spread={current_spread:.4f}, Z={z_score:.2f}"
+                )
+                
+                return {
+                    'symbol_pair': f"{symbol1}-{symbol2}",
+                    'correlation': correlation,
+                    'hedge_ratio': hedge_ratio,
+                    'spread': current_spread,
+                    'spread_mean': spread_mean,
+                    'spread_std': spread_std,
+                    'z_score': z_score,
+                    'volatility_1': volatility_1,
+                    'volatility_2': volatility_2
+                }
                 
         except Exception as e:
-            logger.error(f"Error storing analytics result: {e}")
+            logger.error(f"Error computing pair analytics for {symbol1}/{symbol2}: {e}", exc_info=True)
+            return None
 
 
 # Global analytics engine instance

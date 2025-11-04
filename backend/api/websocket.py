@@ -5,7 +5,7 @@ WebSocket endpoint for real-time data streaming to frontend clients
 import asyncio
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Set
 from decimal import Decimal
 
@@ -72,6 +72,8 @@ class ConnectionManager:
                     continue
                 
                 # Get latest ticks for all symbols
+                # NOTE: Removed 60-second time filter temporarily to show historical data
+                # Add back when live data ingestion is working: .where(RawTicks.timestamp >= cutoff_time)
                 async for session in database_manager.get_session():
                     result = await session.execute(
                         select(RawTicks)
@@ -117,6 +119,8 @@ class ConnectionManager:
                     continue
                 
                 # Get latest analytics results
+                # NOTE: Removed 5-minute time filter temporarily to show historical data
+                # Add back when live analytics are being generated: .where(AnalyticsResults.timestamp >= cutoff_time)
                 async for session in database_manager.get_session():
                     result = await session.execute(
                         select(AnalyticsResults)

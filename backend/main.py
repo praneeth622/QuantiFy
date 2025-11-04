@@ -20,7 +20,7 @@ from api.routes import analytics, market_data, alerts, health
 from api.api_routes import router as consolidated_router  # Import consolidated routes
 from api.websocket import router as websocket_router  # Import WebSocket routes
 from database.connection import database_manager
-from ingestion.websocket_manager import websocket_manager
+from ingestion.direct_websocket_manager import websocket_manager  # Use direct WebSocket manager
 from resampling.resampler_service import ResamplerService
 from analytics.engine import AnalyticsEngine
 from alerts.manager import AlertManager
@@ -99,31 +99,32 @@ async def run_analytics_periodic():
     symbol_pairs = [
         ("BTCUSDT", "ETHUSDT"),
         ("ETHUSDT", "ADAUSDT"),
-        # Add more pairs as needed
+        ("SOLUSDT", "ADAUSDT"),
+        ("BTCUSDT", "SOLUSDT"),
     ]
     
     while not shutdown_event.is_set():
         try:
             start_time = datetime.now()
             
-            # Calculate analytics for each pair
+            # Calculate complete analytics for each pair
             for symbol1, symbol2 in symbol_pairs:
                 try:
-                    # Calculate correlation
-                    correlation = await analytics_engine.calculate_correlation(
-                        symbol1, symbol2, window_minutes=60
+                    # Use 5min window with 50 periods = 250 minutes (~4 hours of data)
+                    result = await analytics_engine.compute_pair_analytics(
+                        symbol1, symbol2, window_minutes=5, lookback_periods=50
                     )
                     
-                    # Calculate hedge ratio
-                    hedge_ratio = await analytics_engine.calculate_hedge_ratio(
-                        symbol1, symbol2, window_minutes=60
-                    )
-                    
-                    logger.info(
-                        f"📈 Analytics: {symbol1}/{symbol2} - "
-                        f"Correlation: {correlation:.4f if correlation else 'N/A'}, "
-                        f"Hedge Ratio: {hedge_ratio:.4f if hedge_ratio else 'N/A'}"
-                    )
+                    if result:
+                        logger.info(
+                            f"📈 Analytics: {result['symbol_pair']} - "
+                            f"Corr: {result['correlation']:.4f}, "
+                            f"Hedge: {result['hedge_ratio']:.4f}, "
+                            f"Z-score: {result['z_score']:.2f}"
+                        )
+                    else:
+                        logger.warning(f"⚠️  No analytics computed for {symbol1}/{symbol2}")
+                        
                 except Exception as e:
                     logger.error(f"Error calculating analytics for {symbol1}/{symbol2}: {e}")
             
@@ -188,11 +189,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("🔄 [3/7] Initializing resampler service...")
         resampler_service = ResamplerService(
             symbols=['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'DOTUSDT'],
-            timeframes=['1m', '5m', '15m', '1h', '4h', '1d'],
-            lookback_minutes=120,  # Look back 2 hours for unprocessed data
+            timeframes=['1s', '1m', '5m', '15m', '1h', '4h', '1d'],  # Added 1s timeframe
+            lookback_minutes=240,  # Increased from 120 to 240 minutes (4 hours lookback)
             run_interval=10.0  # Run every 10 seconds
         )
-        logger.info("✅ Resampler service initialized (6 timeframes, 5 symbols)")
+        logger.info("✅ Resampler service initialized (7 timeframes, 5 symbols)")
         
         # 4. Initialize analytics engine
         logger.info("📊 [4/7] Initializing analytics engine...")

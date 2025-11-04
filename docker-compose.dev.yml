@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (Development)
+  postgres:
+    image: postgres:15-alpine
+    container_name: quantify-postgres-dev
+    environment:
+      POSTGRES_DB: quantify_db
+      POSTGRES_USER: quantify_user
+      POSTGRES_PASSWORD: quantify_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - quantify-dev-network
+    restart: unless-stopped
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: quantify-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - quantify-dev-network
+    restart: unless-stopped
+
+  # FastAPI Backend (Development with hot reload)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: quantify-backend-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=sqlite+aiosqlite:///./quantify.db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=DEBUG
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+      - backend_dev_logs:/tmp
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - quantify-dev-network
+    restart: unless-stopped
+
+  # Next.js Frontend (Development with hot reload)
+  frontend:
+    image: node:18-alpine
+    container_name: quantify-frontend-dev
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    command: sh -c "corepack enable pnpm && pnpm install && pnpm dev"
+    depends_on:
+      - backend
+    networks:
+      - quantify-dev-network
+    restart: unless-stopped
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+  backend_dev_logs:
+    driver: local
+
+networks:
+  quantify-dev-network:
+    driver: bridge
+

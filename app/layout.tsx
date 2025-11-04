@@ -6,6 +6,7 @@ import "./globals.css"
 import { Poppins, Geist_Mono, Lora } from 'next/font/google'
 import { Toaster } from '@/components/ui/sonner'
 import { QueryProvider } from './providers/QueryProvider'
+import { ReduxProvider } from './providers/ReduxProvider'
 
 // Initialize fonts
 const _poppins = Poppins({ subsets: ['latin'], weight: ["100","200","300","400","500","600","700","800","900"] })
@@ -26,9 +27,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased`}>
-        <QueryProvider>
-          {children}
-        </QueryProvider>
+        <ReduxProvider>
+          <QueryProvider>
+            {children}
+          </QueryProvider>
+        </ReduxProvider>
         <Toaster position="top-right" richColors closeButton />
       </body>
     </html>
