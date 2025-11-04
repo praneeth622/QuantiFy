@@ -13,6 +13,7 @@ import marketDataSlice from './slices/marketDataSlice';
 import uiSlice from './slices/uiSlice';
 import alertSlice from './slices/alertSlice';
 import websocketSlice from './slices/websocketSlice';
+import analyticsSlice from './slices/analyticsSlice';
 
 // ============================================================================
 // Persist Configuration
@@ -21,7 +22,7 @@ import websocketSlice from './slices/websocketSlice';
 const persistConfig = {
   key: 'quantify-root',
   storage,
-  whitelist: ['ui', 'marketData'], // Only persist UI settings and market data metadata
+  whitelist: ['ui', 'marketData', 'analytics'], // Persist UI, market data metadata, and analytics config
   blacklist: ['websocket'], // Don't persist websocket connection state
 };
 
@@ -30,6 +31,13 @@ const marketDataPersistConfig = {
   storage,
   whitelist: ['selectedSymbol', 'timeframe', 'windowSize'], // Only persist user preferences
   blacklist: ['ticks', 'ohlcv', 'latestData'], // Don't persist actual data - it should be fresh
+};
+
+const analyticsPersistConfig = {
+  key: 'analytics',
+  storage,
+  whitelist: ['config'], // Only persist configuration
+  blacklist: ['live', 'history', 'loading', 'errors'], // Don't persist live data or states
 };
 
 // ============================================================================
@@ -41,6 +49,7 @@ const rootReducer = combineReducers({
   ui: uiSlice,
   alerts: alertSlice,
   websocket: websocketSlice,
+  analytics: persistReducer(analyticsPersistConfig, analyticsSlice),
 });
 
 // Create the persisted reducer
