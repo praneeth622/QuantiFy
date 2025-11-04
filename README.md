@@ -1,5 +1,7 @@
 # QuantiFy
 
+[▶️ Video Demo (Loom)](https://www.loom.com/share/0fe92954b79a4a218d2fe6a7170569a1)
+
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -10,6 +12,15 @@
 **QuantiFy** is a real-time trading analytics platform designed for quantitative traders and researchers at Multi-Factor Trading (MFT) firms. The platform provides institutional-grade infrastructure for statistical arbitrage, risk-premia harvesting, and market-making analytics across commodities, fixed income, energy, and equities markets.
 
 ---
+
+## 🎥 Demo
+
+Watch a quick walkthrough / demo of QuantiFy on Loom:
+
+[Watch demo on Loom ▶️](https://www.loom.com/share/0fe92954b79a4a218d2fe6a7170569a1)
+
+You can use this link during presentations or to share the application tour with stakeholders.
+
 
 ## 📋 Overview
 
@@ -923,7 +934,7 @@ Once you have the exported PNG/SVG, paste it into the repo root (or tell me the 
 
 ---
 
-## ✅ Architecture & Design — Evaluation mapping (40%)
+## ✅ Architecture & Design — Evaluation mapping 
 
 Below is a short mapping of how this repo satisfies the Architecture & Design scoring criteria for your assignment.
 

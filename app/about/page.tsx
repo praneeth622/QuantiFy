@@ -199,7 +199,7 @@ export default function AboutPage() {
         <Card className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950/20 dark:to-purple-950/20 border-blue-200 dark:border-blue-900">
           <CardHeader>
             <FileText className="w-10 h-10 text-blue-600 mb-2" />
-            <CardTitle className="text-3xl">Architecture & Design Evaluation (40%)</CardTitle>
+            <CardTitle className="text-3xl">Architecture & Design Evaluation </CardTitle>
             <CardDescription className="text-base">
               How this project addresses the assignment evaluation criteria
             </CardDescription>
@@ -286,7 +286,7 @@ export default function AboutPage() {
 
             <Card className="bg-white dark:bg-slate-900">
               <CardHeader>
-                <CardTitle className="text-xl">Total: Architecture & Design = 40%</CardTitle>
+                <CardTitle className="text-xl">Total: Architecture & Design</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">

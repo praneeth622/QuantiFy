@@ -77,6 +77,30 @@ export default function DashboardReduxPage() {
     }
   }, [dispatch, selectedSymbol]);
   
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + E = Export CSV
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        handleExportCSV();
+      }
+      // Ctrl/Cmd + R = Refresh
+      if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+        handleRefresh();
+      }
+      // Ctrl/Cmd + C = Copy price (when Shift is also pressed)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
+        e.preventDefault();
+        handleCopyPrice();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [selectedSymbol, latestTick, ticks]);
+  
   // Memoized chart data - Industry practice: Transform data only when needed
   const priceChartData = useMemo(() => {
     return ticks.slice(-50).map(tick => ({
@@ -564,6 +588,25 @@ export default function DashboardReduxPage() {
                   <span>Historical Data</span>
                 </>
               )}
+            </div>
+          </div>
+          
+          {/* Keyboard Shortcuts Info */}
+          <div className="mt-4 pt-4 border-t">
+            <p className="text-xs text-muted-foreground mb-2 font-semibold">Keyboard Shortcuts:</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+E</kbd>
+                <span>Export CSV</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+R</kbd>
+                <span>Refresh</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-mono">Ctrl+Shift+C</kbd>
+                <span>Copy Price</span>
+              </div>
             </div>
           </div>
         </CardContent>
