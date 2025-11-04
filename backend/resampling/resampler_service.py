@@ -148,6 +148,10 @@ class ResamplerService:
                 # Run resampling for all symbols and timeframes
                 await self.resample_all()
                 
+                # Cleanup old 1s candles every 10 runs (every 100 seconds)
+                if self.stats['total_runs'] % 10 == 0:
+                    await self._cleanup_old_candles()
+                
                 # Update statistics
                 duration = (datetime.now() - start_time).total_seconds()
                 self.stats['last_run_time'] = start_time
@@ -381,6 +385,39 @@ class ResamplerService:
                 raise
             finally:
                 await session.close()
+    
+    async def _cleanup_old_candles(self):
+        """
+        Cleanup old 1s candles to prevent database bloat
+        Keeps only last 1 hour of 1s candles
+        """
+        try:
+            cutoff_time = datetime.now() - timedelta(hours=1)
+            
+            async for session in database_manager.get_session():
+                try:
+                    from sqlalchemy import delete
+                    
+                    # Delete old 1s candles
+                    stmt = delete(ResampledData).where(
+                        and_(
+                            ResampledData.timeframe == '1s',
+                            ResampledData.timestamp < cutoff_time
+                        )
+                    )
+                    
+                    result = await session.execute(stmt)
+                    await session.commit()
+                    
+                    deleted_count = result.rowcount
+                    if deleted_count > 0:
+                        logger.info(f"🧹 Cleaned up {deleted_count} old 1s candles (older than 1 hour)")
+                    
+                finally:
+                    await session.close()
+                    
+        except Exception as e:
+            logger.error(f"Error cleaning up old candles: {e}", exc_info=True)
     
     def get_statistics(self) -> Dict:
         """Get current service statistics"""
