@@ -97,46 +97,27 @@ const handleAPIError = (error: AxiosError<ErrorResponse>): void => {
     const detail = error.response.data?.detail || error.message;
 
     switch (status) {
-      case 400:
-        errorMessage = `Bad Request: ${detail}`;
-        break;
-      case 401:
-        errorMessage = 'Unauthorized. Please check your credentials.';
-        break;
-      case 403:
-        errorMessage = 'Forbidden. You do not have access to this resource.';
-        break;
-      case 404:
-        errorMessage = `Resource not found: ${detail}`;
-        break;
-      case 422:
-        errorMessage = `Validation Error: ${detail}`;
-        break;
-      case 429:
-        errorMessage = 'Too many requests. Please try again later.';
-        break;
-      case 500:
-        errorMessage = 'Server error. Please try again later.';
-        break;
-      case 503:
-        errorMessage = 'Service unavailable. The server may be down.';
-        break;
+      /* Lines 100-124 omitted */
       default:
-        errorMessage = `Error ${status}: ${detail}`;
+        /* Line 125 omitted */
     }
   } else if (error.request) {
     // Request made but no response received
-    errorMessage = 'Network error. Please check your connection.';
+    // Don't show toast for network errors during initial load
+    console.warn('Network error:', error.message);
+    return; // Silent fail for network errors
   } else {
     // Error setting up the request
     errorMessage = error.message || 'Failed to make request';
   }
 
-  // Show toast notification
-  toast.error(errorMessage, {
-    duration: 5000,
-    position: 'top-right',
-  });
+  // Only show toast for non-network errors
+  if (error.response) {
+    toast.error(errorMessage, {
+      duration: 5000,
+      position: 'top-right',
+    });
+  }
 
   // Log error in development
   if (process.env.NODE_ENV === 'development') {
@@ -157,6 +138,7 @@ export const getSymbols = async (): Promise<Symbol[]> => {
     return response.data;
   } catch (error) {
     console.warn('Failed to fetch symbols from API, returning defaults');
+    // Don't show error toast for this - it's expected on initial load
     // Return default symbols if API is down
     return [
       { symbol: 'BTCUSDT', exchange: 'binance' },

@@ -125,13 +125,95 @@ graph TB
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Option 1: Docker (Recommended)
+
+The easiest way to run QuantiFy is using Docker. This method handles all dependencies and services automatically.
+
+#### Prerequisites
+- **Docker** 20.10+ ([Install Docker](https://docs.docker.com/get-docker/))
+- **Docker Compose** 2.0+ (included with Docker Desktop)
+
+#### Quick Start with Docker
+
+**Development Mode** (with hot reload):
+```bash
+# Start all services
+./docker-start.sh dev
+
+# Or using Make
+make dev
+
+# Or using Docker Compose directly
+docker compose -f docker-compose.dev.yml up --build
+```
+
+**Production Mode**:
+```bash
+# Start all services
+./docker-start.sh prod
+
+# Or using Make
+make prod
+
+# Or using Docker Compose directly
+docker compose up --build -d
+```
+
+#### Access the Application
+
+- **Frontend Dashboard**: http://localhost:3000
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **Health Check**: http://localhost:8000/health
+- **pgAdmin** (optional): http://localhost:5050
+
+#### Docker Management Commands
+
+```bash
+# View logs
+docker compose logs -f
+
+# Stop all services
+./docker-stop.sh
+# or
+make down
+
+# Restart services
+make restart
+
+# Clean everything (containers, volumes, images)
+make clean
+
+# Access backend shell
+make shell-backend
+
+# Access frontend shell
+make shell-frontend
+```
+
+#### Docker Architecture
+
+The Docker setup includes:
+- **Frontend**: Next.js application (port 3000)
+- **Backend**: FastAPI server (port 8000)
+- **PostgreSQL**: TimescaleDB for time-series data (port 5432)
+- **Redis**: Caching and real-time data (port 6379)
+- **pgAdmin**: Database management UI (port 5050, optional)
+- **Nginx**: Reverse proxy (port 80, production only)
+
+---
+
+### Option 2: Manual Setup
+
+If you prefer to run services manually without Docker:
+
+#### Prerequisites
 
 - **Python 3.11+** (with pip)
 - **Node.js 18+** (with npm/pnpm)
 - **Git** (for cloning the repository)
 
-### Backend Setup
+#### Backend Setup
 
 ```bash
 # Navigate to backend directory
@@ -303,6 +385,232 @@ curl -X POST "http://localhost:8000/api/alerts" \
 ```bash
 curl "http://localhost:8000/api/export/csv?symbol=BTCUSDT&data_type=ticks&start_time=2025-11-01T00:00:00&end_time=2025-11-02T00:00:00" \
   -o btc_ticks.csv
+```
+
+---
+
+## 🐳 Docker Deployment
+
+### Docker Files Overview
+
+The repository includes comprehensive Docker support:
+
+```
+QuantiFy/
+├── Dockerfile                    # Frontend production build
+├── docker-compose.yml            # Production orchestration
+├── docker-compose.dev.yml        # Development with hot reload
+├── .dockerignore                 # Frontend build optimization
+├── docker-start.sh               # Startup script
+├── docker-stop.sh                # Shutdown script
+├── Makefile                      # Convenient commands
+├── nginx/
+│   └── nginx.conf               # Reverse proxy config
+└── backend/
+    ├── Dockerfile               # Backend Python image
+    └── .dockerignore            # Backend build optimization
+```
+
+### Production Deployment
+
+#### Using Docker Compose
+
+```bash
+# Build and start all services
+docker compose up --build -d
+
+# Check service status
+docker compose ps
+
+# View logs
+docker compose logs -f
+
+# Stop services
+docker compose down
+```
+
+#### Using Make Commands
+
+```bash
+# Start production
+make prod
+
+# View logs
+make logs
+
+# Stop all services
+make down
+
+# Clean everything
+make clean
+```
+
+#### Environment Variables
+
+Create a `.env` file in the root directory:
+
+```env
+# Database
+POSTGRES_DB=quantify_db
+POSTGRES_USER=quantify_user
+POSTGRES_PASSWORD=your_secure_password
+
+# Redis
+REDIS_URL=redis://redis:6379/0
+
+# Backend
+DATABASE_URL=postgresql+asyncpg://quantify_user:your_secure_password@postgres:5432/quantify_db
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+
+# Frontend
+NEXT_PUBLIC_API_URL=http://backend:8000
+NEXT_PUBLIC_WS_URL=ws://backend:8000
+```
+
+### Development with Docker
+
+Development mode includes hot reload for both frontend and backend:
+
+```bash
+# Start development environment
+make dev
+
+# Or using docker-compose
+docker compose -f docker-compose.dev.yml up
+
+# Backend changes auto-reload (uvicorn --reload)
+# Frontend changes auto-reload (next dev)
+```
+
+### Docker Services
+
+#### Frontend (Next.js)
+- **Image**: Multi-stage build with Node 18 Alpine
+- **Port**: 3000
+- **Features**: Standalone output, optimized production build
+- **Health Check**: HTTP GET on port 3000
+
+#### Backend (FastAPI)
+- **Image**: Python 3.11 slim
+- **Port**: 8000
+- **Features**: Uvicorn ASGI server, async SQLAlchemy
+- **Health Check**: `/health` endpoint
+
+#### PostgreSQL (TimescaleDB)
+- **Image**: TimescaleDB (PostgreSQL 15)
+- **Port**: 5432
+- **Features**: Time-series optimization, automatic partitioning
+- **Volume**: Persistent data storage
+
+#### Redis
+- **Image**: Redis 7 Alpine
+- **Port**: 6379
+- **Features**: AOF persistence, caching layer
+- **Volume**: Persistent data storage
+
+#### Nginx (Production Only)
+- **Image**: Nginx Alpine
+- **Ports**: 80, 443
+- **Features**: Reverse proxy, rate limiting, SSL termination
+- **Profile**: `production` (start with `--profile production`)
+
+### Scaling with Docker
+
+#### Horizontal Scaling
+
+Scale backend instances:
+```bash
+docker compose up --scale backend=3 -d
+```
+
+#### Resource Limits
+
+Add resource constraints in `docker-compose.yml`:
+```yaml
+services:
+  backend:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+```
+
+#### Health Checks
+
+All services include health checks:
+- **Backend**: `curl -f http://localhost:8000/health`
+- **Frontend**: `wget --spider http://localhost:3000`
+- **PostgreSQL**: `pg_isready`
+- **Redis**: `redis-cli ping`
+
+### Troubleshooting Docker
+
+#### View Container Logs
+```bash
+# All services
+docker compose logs -f
+
+# Specific service
+docker compose logs -f backend
+docker compose logs -f frontend
+```
+
+#### Access Container Shell
+```bash
+# Backend
+docker exec -it quantify-backend /bin/bash
+
+# Frontend
+docker exec -it quantify-frontend /bin/sh
+
+# Database
+docker exec -it quantify-postgres psql -U quantify_user -d quantify_db
+```
+
+#### Reset Everything
+```bash
+# Stop and remove all containers, volumes, and images
+make clean
+
+# Or manually
+docker compose down -v --rmi all
+docker compose -f docker-compose.dev.yml down -v --rmi all
+```
+
+#### Common Issues
+
+**Port already in use:**
+```bash
+# Find process using port 3000
+lsof -i :3000
+# Kill the process
+kill -9 <PID>
+```
+
+**Database connection failed:**
+```bash
+# Check PostgreSQL is running
+docker compose ps postgres
+
+# Check logs
+docker compose logs postgres
+
+# Restart database
+docker compose restart postgres
+```
+
+**Build cache issues:**
+```bash
+# Rebuild without cache
+docker compose build --no-cache
+
+# Remove all unused images
+docker system prune -a
 ```
 
 ---

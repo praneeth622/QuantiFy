@@ -68,7 +68,7 @@ const initialState: MarketDataState = {
   symbolsError: null,
   
   selectedSymbol: 'BTCUSDT',
-  timeframe: '1m',
+  timeframe: '1s', // Default to 1s for high-frequency trading
   windowSize: 100, // Default sliding window size
   
   ticks: {

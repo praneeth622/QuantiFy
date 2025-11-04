@@ -11,7 +11,7 @@
 
 'use client';
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../store';
 import { useWebSocketRedux } from '../hooks/useWebSocketRedux';
 import {
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TrendingUp, BarChart3, Activity, RefreshCw, Zap, Database } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { LiveAnalytics } from '@/components/LiveAnalytics';
 
 export default function DashboardReduxPage() {
   const dispatch = useAppDispatch();
@@ -48,26 +49,49 @@ export default function DashboardReduxPage() {
   const chartSettings = useAppSelector(selectChartSettings);
   const symbols = useAppSelector(state => state.marketData.symbols);
   
+  // Track if operations are in progress to prevent infinite loops
+  const symbolsLoadedRef = useRef(false);
+  const lastFetchedSymbol = useRef<string | null>(null);
+  const isInitializing = useRef(false);
+  
   // WebSocket connection - automatically syncs with Redux
+  // Only subscribe when we have a valid symbol
   const { connected: wsConnected } = useWebSocketRedux({
     url: 'ws://localhost:8000/ws',
     autoConnect: true,
     symbols: selectedSymbol ? [selectedSymbol] : [],
   });
   
-  // Initialize data on mount
+  // Step 1: Load symbols once on mount
   useEffect(() => {
-    // Fetch available symbols
-    dispatch(fetchSymbols());
-    
-    // Fetch initial historical data for context
-    if (selectedSymbol) {
+    if (!symbolsLoadedRef.current && !isInitializing.current) {
+      symbolsLoadedRef.current = true;
+      isInitializing.current = true;
+      
+      dispatch(fetchSymbols())
+        .finally(() => {
+          isInitializing.current = false;
+        });
+    }
+  }, []); // Empty deps - run once only
+  
+  // Step 2: Set default symbol if none selected (after symbols loaded)
+  useEffect(() => {
+    if (!selectedSymbol && symbols.length > 0 && !isInitializing.current) {
+      dispatch(setSelectedSymbol(symbols[0].symbol));
+    }
+  }, [symbols.length]); // Only depend on symbols.length to avoid infinite loop
+  
+  // Step 3: Fetch ticks when symbol changes
+  useEffect(() => {
+    if (selectedSymbol && selectedSymbol !== lastFetchedSymbol.current && !isInitializing.current) {
+      lastFetchedSymbol.current = selectedSymbol;
       dispatch(fetchTicks({
         symbol: selectedSymbol,
-        limit: 100, // Small initial load
+        limit: 100,
       }));
     }
-  }, [dispatch, selectedSymbol]);
+  }, [selectedSymbol]); // Only depend on selectedSymbol
   
   // Memoized chart data - Industry practice: Transform data only when needed
   const priceChartData = useMemo(() => {
@@ -86,23 +110,27 @@ export default function DashboardReduxPage() {
     }));
   }, [ticks]);
   
-  // Handlers - Dispatch Redux actions instead of local setState
-  const handleSymbolChange = (symbol: string) => {
-    dispatch(setSelectedSymbol(symbol));
-  };
+  // Handlers - Memoized with useCallback to prevent unnecessary re-renders
+  const handleSymbolChange = useCallback((symbol: string) => {
+    if (symbol && symbol !== selectedSymbol) {
+      dispatch(setSelectedSymbol(symbol));
+    }
+  }, [selectedSymbol, dispatch]);
   
-  const handleTimeframeChange = (tf: string) => {
-    dispatch(setTimeframe(tf as any));
-  };
+  const handleTimeframeChange = useCallback((tf: string) => {
+    if (tf && tf !== timeframe) {
+      dispatch(setTimeframe(tf as any));
+    }
+  }, [timeframe, dispatch]);
   
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     if (selectedSymbol) {
       dispatch(fetchTicks({
         symbol: selectedSymbol,
         limit: 100,
       }));
     }
-  };
+  }, [selectedSymbol, dispatch]);
   
   return (
     <div className="min-h-screen bg-background p-6 space-y-6">
@@ -144,7 +172,10 @@ export default function DashboardReduxPage() {
             {/* Symbol Selector */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Symbol</label>
-              <Select value={selectedSymbol || ''} onValueChange={handleSymbolChange}>
+              <Select 
+                value={selectedSymbol || 'BTCUSDT'} 
+                onValueChange={handleSymbolChange}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select symbol" />
                 </SelectTrigger>
@@ -219,6 +250,9 @@ export default function DashboardReduxPage() {
           </div>
         </CardContent>
       </Card>
+      
+      {/* Live Analytics - Real-time metrics with intelligent update intervals */}
+      <LiveAnalytics />
       
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
